@@ -11,18 +11,33 @@
 		"check": "biome check ."
 	},
 	"dependencies": {
+		"@better-auth/drizzle-adapter": "^1.7.7",
+		"@neondatabase/serverless": "^1.2.0",
+		"better-auth": "^1.7.7",
+		"bufferutil": "^4.1.0",
+		"drizzle-orm": "^0.45.4",
 		"next": "16.4.0",
+		"pg": "^8.23.1",
 		"react": "19.3.0",
-		"react-dom": "19.3.0"
+		"react-dom": "19.3.0",
+		"server-only": "^0.0.1",
+		"ws": "^8.22.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.15",
 		"@tailwindcss/turbopack": "^4",
 		"@types/node": "^20",
+		"@types/pg": "^8.23.1",
 		"@types/react": "^19",
 		"@types/react-dom": "^19",
+		"@types/ws": "^8.18.2",
 		"babel-plugin-react-compiler": "1.0.0",
+		"dotenv": "^18.0.7",
+		"drizzle-kit": "^0.31.11",
 		"tailwindcss": "^4",
 		"typescript": "^5"
+	},
+	"overrides": {
+		"esbuild": "0.28.2"
 	}
 }
