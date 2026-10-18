@@ -39,8 +39,8 @@ export const monitors = appSchema.table(
 			.defaultNow()
 			.notNull(),
 		deletedAt: timestamp("deleted_at", {
-	withTimezone: true,
-}),
+			withTimezone: true,
+		}),
 	},
 	(table) => [
 		index("monitors_owner_id_idx").on(table.ownerId),

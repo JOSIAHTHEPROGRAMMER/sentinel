@@ -15,6 +15,13 @@
       "when": 1791997891495,
       "tag": "0001_add_monitor_soft_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792348422398,
+      "tag": "0002_monitoring_write_policies",
+      "breakpoints": true
     }
   ]
 }

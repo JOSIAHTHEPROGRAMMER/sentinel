@@ -1,8 +1,9 @@
-import { sql } from "drizzle-orm";
+import { isNull, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { monitors } from "@/lib/db/schema/app";
+import { validateMonitorUrl } from "@/lib/validation/monitor-url";
 
 export async function POST(request: Request) {
 	const session = await getSession();
@@ -34,7 +35,6 @@ export async function POST(request: Request) {
 	}
 
 	const name = body.name.trim();
-	const urlValue = body.url.trim();
 
 	if (name.length < 1 || name.length > 100) {
 		return NextResponse.json(
@@ -43,30 +43,10 @@ export async function POST(request: Request) {
 		);
 	}
 
-	if (urlValue.length > 2048) {
-		return NextResponse.json({ error: "URL is too long" }, { status: 400 });
-	}
+	const urlResult = validateMonitorUrl(body.url);
 
-	let parsedUrl: URL;
-
-	try {
-		parsedUrl = new URL(urlValue);
-	} catch {
-		return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
-	}
-
-	const hostname = parsedUrl.hostname.toLowerCase();
-
-	if (
-		!["http:", "https:"].includes(parsedUrl.protocol) ||
-		parsedUrl.username !== "" ||
-		parsedUrl.password !== "" ||
-		hostname === "localhost" ||
-		hostname.endsWith(".localhost") ||
-		hostname.endsWith(".local") ||
-		hostname.endsWith(".internal")
-	) {
-		return NextResponse.json({ error: "URL is not allowed" }, { status: 400 });
+	if (!urlResult.valid) {
+		return NextResponse.json({ error: urlResult.error }, { status: 400 });
 	}
 
 	const monitor = await db.transaction(async (tx) => {
@@ -79,7 +59,7 @@ export async function POST(request: Request) {
 			.values({
 				ownerId: session.user.id,
 				name,
-				url: parsedUrl.toString(),
+				url: urlResult.url,
 			})
 			.returning({
 				id: monitors.id,
@@ -119,6 +99,7 @@ export async function GET() {
 				updatedAt: monitors.updatedAt,
 			})
 			.from(monitors)
+			.where(isNull(monitors.deletedAt))
 			.orderBy(monitors.createdAt);
 	});
 

@@ -1,8 +1,9 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { monitors } from "@/lib/db/schema/app";
+import { validateMonitorUrl } from "@/lib/validation/monitor-url";
 
 type RouteContext = {
 	params: Promise<{ id: string }>;
@@ -41,7 +42,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
 				updatedAt: monitors.updatedAt,
 			})
 			.from(monitors)
-			.where(eq(monitors.id, id))
+			.where(and(eq(monitors.id, id), isNull(monitors.deletedAt)))
 			.limit(1);
 
 		return result;
@@ -128,36 +129,13 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 	}
 
 	if ("url" in input) {
-		if (typeof input.url !== "string" || input.url.trim().length > 2048) {
-			return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+		const urlResult = validateMonitorUrl(input.url);
+
+		if (!urlResult.valid) {
+			return NextResponse.json({ error: urlResult.error }, { status: 400 });
 		}
 
-		let parsedUrl: URL;
-
-		try {
-			parsedUrl = new URL(input.url.trim());
-		} catch {
-			return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
-		}
-
-		const hostname = parsedUrl.hostname.toLowerCase();
-
-		if (
-			!["http:", "https:"].includes(parsedUrl.protocol) ||
-			parsedUrl.username !== "" ||
-			parsedUrl.password !== "" ||
-			hostname === "localhost" ||
-			hostname.endsWith(".localhost") ||
-			hostname.endsWith(".local") ||
-			hostname.endsWith(".internal")
-		) {
-			return NextResponse.json(
-				{ error: "URL is not allowed" },
-				{ status: 400 },
-			);
-		}
-
-		updates.url = parsedUrl.toString();
+		updates.url = urlResult.url;
 	}
 
 	if ("enabled" in input) {
@@ -213,7 +191,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 		const [result] = await tx
 			.update(monitors)
 			.set(updates)
-			.where(eq(monitors.id, id))
+			.where(and(eq(monitors.id, id), isNull(monitors.deletedAt)))
 			.returning({
 				id: monitors.id,
 				name: monitors.name,
@@ -232,4 +210,46 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 	}
 
 	return NextResponse.json({ monitor: updatedMonitor });
+}
+
+export async function DELETE(_request: Request, { params }: RouteContext) {
+	const session = await getSession();
+
+	if (!session) {
+		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+	}
+
+	const { id } = await params;
+
+	const isUuid =
+		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+	if (!isUuid) {
+		return NextResponse.json({ error: "Invalid monitor ID" }, { status: 400 });
+	}
+
+	const deletedMonitor = await db.transaction(async (tx) => {
+		await tx.execute(
+			sql`SELECT set_config('app.user_id', ${session.user.id}, true)`,
+		);
+
+		const [result] = await tx
+			.update(monitors)
+			.set({
+				deletedAt: new Date(),
+				updatedAt: new Date(),
+			})
+			.where(and(eq(monitors.id, id), isNull(monitors.deletedAt)))
+			.returning({
+				id: monitors.id,
+			});
+
+		return result;
+	});
+
+	if (!deletedMonitor) {
+		return NextResponse.json({ error: "Monitor not found" }, { status: 404 });
+	}
+
+	return NextResponse.json({ success: true });
 }
