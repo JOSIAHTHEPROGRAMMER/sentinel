@@ -1,4 +1,4 @@
-import "server-only";
+//import "server-only";
 
 import { Client } from "undici";
 import { validateMonitorTarget } from "../validation/monitor-target";
@@ -6,7 +6,7 @@ import { validateMonitorTarget } from "../validation/monitor-target";
 const CONNECT_TIMEOUT_MS = 3_000;
 const HEADERS_TIMEOUT_MS = 5_000;
 const BODY_TIMEOUT_MS = 5_000;
-const TOTAL_TIMEOUT_MS = 10_000;
+//const TOTAL_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const MAX_REDIRECTS = 3;
 
@@ -18,9 +18,12 @@ export type HttpCheckResult = {
 	error?: string;
 };
 
-export async function checkHttpTarget(value: string): Promise<HttpCheckResult> {
+export async function checkHttpTarget(
+	value: string,
+	timeoutMs = 10_000,
+): Promise<HttpCheckResult> {
 	const startedAt = Date.now();
-	const signal = AbortSignal.timeout(TOTAL_TIMEOUT_MS);
+	const signal = AbortSignal.timeout(timeoutMs);
 	let currentUrl = value;
 
 	const failure = (

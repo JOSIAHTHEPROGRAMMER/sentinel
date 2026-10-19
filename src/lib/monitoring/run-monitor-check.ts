@@ -1,46 +1,34 @@
-import "server-only";
-
-import { and, eq, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { and, eq, isNull } from "drizzle-orm";
 import { monitors } from "@/lib/db/schema/app";
+import { workerDb } from "@/lib/db/worker";
 import { checkHttpTarget } from "./http-check";
 import { recordMonitorCheck } from "./record-check";
 
-export async function runMonitorCheck(
-	monitorId: string,
-	ownerId: string,
-): Promise<void> {
-	const monitor = await db.transaction(async (tx) => {
-		await tx.execute(sql`SELECT set_config('app.user_id', ${ownerId}, true)`);
-
-		const [result] = await tx
-			.select({
-				id: monitors.id,
-				url: monitors.url,
-				enabled: monitors.enabled,
-			})
-			.from(monitors)
-			.where(
-				and(
-					eq(monitors.id, monitorId),
-					eq(monitors.ownerId, ownerId),
-					eq(monitors.enabled, true),
-				),
-			)
-			.limit(1);
-
-		return result ?? null;
-	});
+export async function runMonitorCheck(monitorId: string): Promise<void> {
+	const [monitor] = await workerDb
+		.select({
+			id: monitors.id,
+			url: monitors.url,
+			timeoutMs: monitors.timeoutMs,
+		})
+		.from(monitors)
+		.where(
+			and(
+				eq(monitors.id, monitorId),
+				eq(monitors.enabled, true),
+				isNull(monitors.deletedAt),
+			),
+		)
+		.limit(1);
 
 	if (!monitor) {
 		return;
 	}
 
-	const result = await checkHttpTarget(monitor.url);
+	const result = await checkHttpTarget(monitor.url, monitor.timeoutMs);
 
 	await recordMonitorCheck({
 		monitorId: monitor.id,
-		ownerId,
 		result,
 	});
 }

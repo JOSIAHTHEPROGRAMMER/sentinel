@@ -41,3 +41,4 @@ yarn-error.log*
 next-env.d.ts
 migration-debug.log
 !.env.example
+scripts/

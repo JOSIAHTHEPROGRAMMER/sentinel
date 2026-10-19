@@ -7,6 +7,7 @@ import {
 	pgSchema,
 	text,
 	timestamp,
+	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
@@ -93,7 +94,9 @@ export const incidents = appSchema.table(
 		monitorId: uuid("monitor_id")
 			.notNull()
 			.references(() => monitors.id, { onDelete: "cascade" }),
-		startedAt: timestamp("started_at", { withTimezone: true })
+		startedAt: timestamp("started_at", {
+			withTimezone: true,
+		})
 			.defaultNow()
 			.notNull(),
 		resolvedAt: timestamp("resolved_at", { withTimezone: true }),
@@ -104,15 +107,13 @@ export const incidents = appSchema.table(
 			table.monitorId,
 			table.startedAt,
 		),
+		uniqueIndex("incidents_one_open_per_monitor_idx")
+			.on(table.monitorId)
+			.where(sql`${table.resolvedAt} IS NULL`),
 		pgPolicy("incidents_owner_read", {
 			for: "select",
 			to: "sentinel_app",
-			using: sql`EXISTS (
-				SELECT 1
-				FROM app.monitors AS m
-				WHERE m.id = monitor_id
-				AND m.owner_id = current_setting('app.user_id', true)
-			)`,
+			using: sql`EXISTS(SELECT 1 FROM app.monitors AS m WHERE m.id = monitor_id AND m.owner_id = current_setting('app.user_id', true))`,
 		}),
 	],
 );
