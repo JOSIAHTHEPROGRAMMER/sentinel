@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
 	boolean,
+	foreignKey,
 	index,
 	integer,
 	pgPolicy,
@@ -21,6 +22,33 @@ export const checkStatus = appSchema.enum("check_status", [
 	"error",
 ]);
 
+export const projects = appSchema.table(
+	"projects",
+	{
+		id: uuid("id").defaultRandom().primaryKey(),
+		ownerId: text("owner_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		uniqueIndex("projects_id_owner_id_idx").on(table.id, table.ownerId),
+		index("projects_owner_id_idx").on(table.ownerId),
+		pgPolicy("projects_owner_access", {
+			for: "all",
+			to: "sentinel_app",
+			using: sql`owner_id = current_setting('app.user_id', true)`,
+			withCheck: sql`owner_id = current_setting('app.user_id', true)`,
+		}),
+	],
+);
+
 export const monitors = appSchema.table(
 	"monitors",
 	{
@@ -28,6 +56,7 @@ export const monitors = appSchema.table(
 		ownerId: text("owner_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
+		projectId: uuid("project_id"),
 		name: text("name").notNull(),
 		url: text("url").notNull(),
 		intervalSeconds: integer("interval_seconds").default(300).notNull(),
@@ -51,6 +80,12 @@ export const monitors = appSchema.table(
 			using: sql`owner_id = current_setting('app.user_id', true)`,
 			withCheck: sql`owner_id = current_setting('app.user_id', true)`,
 		}),
+		index("monitors_project_id_idx").on(table.projectId),
+		foreignKey({
+			name: "monitors_project_owner_fk",
+			columns: [table.projectId, table.ownerId],
+			foreignColumns: [projects.id, projects.ownerId],
+		}).onDelete("restrict"),
 	],
 );
 

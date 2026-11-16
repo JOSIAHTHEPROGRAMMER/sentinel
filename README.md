@@ -1,17 +1,76 @@
 # Sentinel
 
-Sentinel is an API monitoring platform built with Next.js, TypeScript, PostgreSQL, and Drizzle ORM. It provides authenticated monitor management, secure database access, URL validation, and the foundation for automated availability checks and incident tracking.
+Sentinel is a self-hosted API monitoring platform built with Next.js, TypeScript, and PostgreSQL. It allows users to register endpoints, monitor their availability, track response times, review check history, and manage incidents when services become unavailable.
+
+The platform uses a separate background worker to execute scheduled HTTP checks, while the web application handles authentication, monitor management, and monitoring data.
+
+## Features
+
+- **Authentication:** Secure user authentication with Better Auth.
+- **Monitor management:** Create, view, update, enable, disable, and delete monitors.
+- **Automated monitoring:** Background worker executes recurring HTTP availability checks.
+- **HTTP status tracking:** Classifies checks as up, down, timeout, or error.
+- **Performance metrics:** Displays uptime percentages, average response times, and recent monitoring activity.
+- **Check history:** Stores and displays recent monitoring results.
+- **Incident management:** Automatically records outages and resolves incidents when services recover.
+- **Incident history:** Review open and resolved incidents, including outage duration.
+- **Server-side data loading:** Loads initial dashboard data on the server to reduce unnecessary client-side requests.
+- **Responsive dashboard:** Provides monitor, performance, and incident management interfaces.
 
 ## Tech Stack
 
-- **Framework:** Next.js 16
-- **Language:** TypeScript
-- **UI:** React and Tailwind CSS
-- **Authentication:** Better Auth
-- **Database:** PostgreSQL with Neon
-- **ORM and migrations:** Drizzle ORM and Drizzle Kit
-- **HTTP monitoring:** Undici
-- **Validation and testing:** Vitest and Biome
+| Category               | Technology               |
+| ---------------------- | ------------------------ |
+| Framework              | Next.js 16               |
+| Language               | TypeScript               |
+| UI                     | React 19, Tailwind CSS 4 |
+| Authentication         | Better Auth              |
+| Database               | PostgreSQL with Neon     |
+| ORM and migrations     | Drizzle ORM, Drizzle Kit |
+| HTTP monitoring        | Undici                   |
+| URL and IP validation  | Node.js DNS, ipaddr.js   |
+| Testing                | Vitest                   |
+| Formatting and linting | Biome                    |
+| Background processing  | Dedicated Node.js worker |
+
+## Architecture
+
+Sentinel separates the web application from background monitoring execution.
+
+### Web application
+
+The Next.js application handles:
+
+- User authentication and session management.
+- Monitor creation and configuration.
+- Protected API endpoints.
+- Dashboard statistics and performance data.
+- Check history and incident management.
+
+### Monitoring worker
+
+A separate Node.js process handles recurring monitoring tasks.
+
+The worker:
+
+1. Retrieves eligible monitors.
+2. Determines which monitors are due for a check.
+3. Validates and executes HTTP requests.
+4. Records check results.
+5. Updates incident state based on service availability.
+6. Schedules subsequent checks.
+
+### Database security
+
+Sentinel uses PostgreSQL Row-Level Security (RLS) to enforce user-level data isolation.
+
+The application and background worker use separate database credentials:
+
+- `sentinel_app` handles authenticated application queries.
+- `sentinel_worker` handles background monitoring operations.
+- `MIGRATION_DATABASE_URL` provides the connection used for schema migrations.
+
+Application queries establish the authenticated user's database context within a transaction before accessing protected records.
 
 ## Getting Started
 
@@ -20,14 +79,22 @@ Sentinel is an API monitoring platform built with Next.js, TypeScript, PostgreSQ
 - Node.js 24
 - npm
 - A Neon PostgreSQL database
+- Separate database credentials for application and worker access
 
-### 1. Install dependencies
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/JOSIAHTHEPROGRAMMER/sentinel.git
+cd sentinel
+```
+
+### 2. Install dependencies
 
 ```bash
 npm install
 ```
 
-### 2. Configure environment variables
+### 3. Configure environment variables
 
 Copy the example environment file:
 
@@ -37,28 +104,29 @@ Copy the example environment file:
 Copy-Item .env.example .env.local
 ```
 
-Update `.env.local` with your own configuration:
+Configure the following variables in `.env.local`:
 
-| Variable                 | Description                                                  |
-| ------------------------ | ------------------------------------------------------------ |
-| `BETTER_AUTH_URL`        | Base URL of the application, such as `http://localhost:3000` |
-| `BETTER_AUTH_SECRET`     | Secret used by Better Auth                                   |
-| `DATABASE_URL`           | Pooled PostgreSQL connection string for application queries  |
-| `MIGRATION_DATABASE_URL` | Direct PostgreSQL connection string for database migrations  |
+| Variable                      | Description                                                  |
+| ----------------------------- | ------------------------------------------------------------ |
+| `BETTER_AUTH_URL`             | Base URL of the application, such as `http://localhost:3000` |
+| `BETTER_AUTH_SECRET`          | Secret used by Better Auth                                   |
+| `DATABASE_URL`                | Pooled PostgreSQL connection string for application queries  |
+| `MIGRATION_DATABASE_URL`      | Direct PostgreSQL connection string for database migrations  |
+| `MONITOR_WORKER_DATABASE_URL` | PostgreSQL connection string for the monitoring worker       |
 
-Use separate database credentials with only the permissions required for each role. Keep SSL certificate and hostname verification enabled.
+Use the appropriate database credentials and permissions for each connection. Keep SSL certificate and hostname verification enabled.
 
 **Never commit `.env.local` or expose database credentials and authentication secrets.**
 
-### 3. Apply database migrations
+### 4. Apply database migrations
 
 ```bash
 npx drizzle-kit migrate
 ```
 
-Ensure both database connection strings are configured before running migrations.
+Ensure the migration database connection is configured before applying migrations.
 
-### 4. Start the development server
+### 5. Start the web application
 
 ```bash
 npm run dev
@@ -66,37 +134,115 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### 6. Start the monitoring worker
+
+In a separate terminal, run:
+
+```bash
+npm run worker
+```
+
+The worker requires `MONITOR_WORKER_DATABASE_URL` to be configured.
+
+Both the Next.js application and monitoring worker must be running for automated monitoring to operate during development.
+
 ## Available Scripts
 
-| Command          | Description                          |
-| ---------------- | ------------------------------------ |
-| `npm run dev`    | Start the Next.js development server |
-| `npm run build`  | Build the application for production |
-| `npm run start`  | Start the production server          |
-| `npm run format` | Format project files                 |
-| `npm run check`  | Run Biome checks                     |
-| `npm run lint`   | Run Biome linting                    |
-| `npm test`       | Run the Vitest test suite            |
+| Command          | Description                                |
+| ---------------- | ------------------------------------------ |
+| `npm run dev`    | Start the Next.js development server       |
+| `npm run build`  | Build the application for production       |
+| `npm run start`  | Start the production server                |
+| `npm run worker` | Start the monitoring worker                |
+| `npm run format` | Format project files                       |
+| `npm run verify` | Run Biome checks and the Vitest test suite |
+| `npm test`       | Run the Vitest test suite                  |
 
 ## Security
 
-Sentinel uses PostgreSQL Row-Level Security (RLS) to restrict access to user-owned application data. Server-side database operations establish the authenticated user's context before accessing protected records.
+Security is an important part of Sentinel's architecture.
 
-Monitor target validation checks URL schemes, credentials, local hostnames, and resolved IP addresses to help mitigate server-side request forgery (SSRF).
+### Database isolation
 
-Database credentials and authentication secrets must remain server-side and must not be exposed to the browser or committed to version control.
+- PostgreSQL Row-Level Security restricts access to user-owned application data.
+- Authenticated application queries establish user context within database transactions.
+- The monitoring worker uses a separate database role with restricted permissions.
+- Database credentials are kept server-side.
 
-## Project Status
+### SSRF protection
 
-The project currently includes authentication and database foundations, protected monitor management endpoints, database ownership policies, and monitor-target validation. HTTP check execution and result/incident persistence are under development, followed by recurring scheduling and the monitoring dashboard.
+Monitor URLs are validated before being accepted as monitoring targets.
+
+Validation includes:
+
+- Restricting supported URL schemes.
+- Rejecting URLs containing embedded credentials.
+- Blocking local and private network destinations.
+- Resolving hostnames and validating their IP addresses.
+- Checking resolved addresses to help prevent server-side request forgery (SSRF).
+
+### Authentication
+
+Better Auth manages user authentication and sessions. Protected application endpoints verify the authenticated session before accessing user- owned resources.
+
+## Project Structure
+
+```text
+src/
+├── app/
+│   ├── (auth)/
+│   ├── (dashboard)/
+│   │   ├── dashboard/
+│   │   ├── incidents/
+│   │   └── monitors/
+│   ├── api/
+│   ├── globals.css
+│   └── layout.tsx
+├── components/
+│   ├── layout/
+│   └── ui/
+├── features/
+│   └── checks/
+│       └── components/
+├── lib/
+│   ├── auth/
+│   ├── data/
+│   ├── db/
+│   ├── monitoring/
+│   └── validation/
+└── worker/
+    └── index.ts
+```
 
 ## Development
 
-Before submitting changes, run the project's formatting, static checks, production build, and tests.
+Before submitting changes, run the project's verification workflow:
 
 ```bash
 npm run format
-npm run check
+npm run verify
 npm run build
-npm test
 ```
+
+The verification command runs Biome checks and the Vitest test suite.
+
+## Project Status
+
+Sentinel currently includes:
+
+- Authentication and protected application routes.
+- PostgreSQL database schema, migrations, and RLS policies.
+- Secure monitor management.
+- Monitor target validation and SSRF protections.
+- Automated HTTP monitoring through a dedicated worker.
+- Check result persistence and monitoring history.
+- Uptime and response-time metrics.
+- Automatic incident creation and resolution.
+- Incident history and filtering.
+- Server-side initial data loading across dashboard pages.
+
+Future development will focus on improving reliability, expanding automated testing, deployment, and documentation.
+
+## License
+
+This project is currently developed as a personal software engineering project.

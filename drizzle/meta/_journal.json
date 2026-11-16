@@ -29,6 +29,13 @@
       "when": 1792360725233,
       "tag": "0003_incidents_one_open_per_monitor",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792695426988,
+      "tag": "0004_serious_warpath",
+      "breakpoints": true
     }
   ]
 }

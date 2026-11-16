@@ -42,3 +42,4 @@ next-env.d.ts
 migration-debug.log
 !.env.example
 scripts/
+PROJECT_STRUCTURE.txt
