@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Monitor = {
 	id: string;
@@ -10,12 +10,23 @@ type Monitor = {
 	enabled: boolean;
 	intervalSeconds: number;
 	timeoutMs: number;
+	projectId: string | null;
 	createdAt: string;
 	updatedAt: string;
 };
 
+type Project = {
+	id: string;
+	name: string;
+};
+
 type MonitorResponse = {
 	monitors?: Monitor[];
+	error?: string;
+};
+
+type ProjectResponse = {
+	projects?: Project[];
 	error?: string;
 };
 
@@ -40,9 +51,44 @@ export default function MonitorsClient({
 	initialMonitors,
 }: MonitorsClientProps) {
 	const [monitors, setMonitors] = useState<Monitor[]>(initialMonitors);
+	const [projects, setProjects] = useState<Project[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const controllerRef = useRef<AbortController | null>(null);
+
+	const [projectsLoading, setProjectsLoading] = useState(true);
+
+	const loadProjects = useCallback(async () => {
+		controllerRef.current?.abort();
+
+		const controller = new AbortController();
+		controllerRef.current = controller;
+
+		try {
+			const response = await fetch("/api/projects", {
+				cache: "no-store",
+				signal: controller.signal,
+			});
+
+			const data: ProjectResponse = await response.json();
+
+			if (!response.ok || !Array.isArray(data.projects)) {
+				throw new Error(data.error ?? "Unable to load projects.");
+			}
+
+			setProjects(data.projects);
+		} catch (cause) {
+			if (controller.signal.aborted) return;
+
+			setError(
+				cause instanceof Error ? cause.message : "Unable to load projects.",
+			);
+		} finally {
+			if (!controller.signal.aborted) {
+				setProjectsLoading(false);
+			}
+		}
+	}, []);
 
 	const loadMonitors = useCallback(async () => {
 		controllerRef.current?.abort();
@@ -54,25 +100,40 @@ export default function MonitorsClient({
 		setError(null);
 
 		try {
-			const response = await fetch("/api/monitors", {
-				cache: "no-store",
-				signal: controller.signal,
-			});
-			const data: MonitorResponse = await response.json();
+			const [monitorResponse, projectResponse] = await Promise.all([
+				fetch("/api/monitors", {
+					cache: "no-store",
+					signal: controller.signal,
+				}),
+				fetch("/api/projects", {
+					cache: "no-store",
+					signal: controller.signal,
+				}),
+			]);
 
-			if (!response.ok) {
+			const [monitorData, projectData]: [MonitorResponse, ProjectResponse] =
+				await Promise.all([monitorResponse.json(), projectResponse.json()]);
+
+			if (!monitorResponse.ok) {
 				throw new Error(
-					response.status === 401
+					monitorResponse.status === 401
 						? "Your session has expired or you are not signed in."
-						: (data.error ?? "Unable to load monitors."),
+						: (monitorData.error ?? "Unable to load monitors."),
 				);
 			}
 
-			if (!Array.isArray(data.monitors)) {
-				throw new Error("The server returned an unexpected response.");
+			if (!Array.isArray(monitorData.monitors)) {
+				throw new Error("The server returned an unexpected monitor response.");
 			}
 
-			setMonitors(data.monitors);
+			if (!projectResponse.ok || !Array.isArray(projectData.projects)) {
+				throw new Error(
+					projectData.error ?? "Unable to load Project associations.",
+				);
+			}
+
+			setMonitors(monitorData.monitors);
+			setProjects(projectData.projects);
 		} catch (cause) {
 			if (controller.signal.aborted) return;
 
@@ -82,9 +143,20 @@ export default function MonitorsClient({
 		} finally {
 			if (!controller.signal.aborted) {
 				setLoading(false);
+				setProjectsLoading(false);
 			}
 		}
 	}, []);
+
+	useEffect(() => {
+		void loadProjects();
+
+		return () => controllerRef.current?.abort();
+	}, [loadProjects]);
+
+	const projectNames = new Map(
+		projects.map((project) => [project.id, project.name]),
+	);
 
 	return (
 		<div className="space-y-8">
@@ -206,6 +278,15 @@ export default function MonitorsClient({
 									</div>
 									<p className="mt-2 max-w-2xl truncate text-sm text-slate-400">
 										{monitor.url}
+									</p>
+									<p className="mt-2 text-xs text-slate-500">
+										Project:{" "}
+										<span className="text-cyan-300">
+											{monitor.projectId
+												? (projectNames.get(monitor.projectId) ??
+													(projectsLoading ? "Loading..." : "Unknown Project"))
+												: "Standalone"}
+										</span>
 									</p>
 								</div>
 

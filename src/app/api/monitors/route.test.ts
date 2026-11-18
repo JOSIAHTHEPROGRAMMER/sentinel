@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getSession, transaction, execute, insert, select } = vi.hoisted(() => ({
-	getSession: vi.fn(),
-	transaction: vi.fn(),
-	execute: vi.fn(),
-	insert: vi.fn(),
-	select: vi.fn(),
-}));
+const { getSession, transaction, execute, insert, select, values } = vi.hoisted(
+	() => ({
+		getSession: vi.fn(),
+		transaction: vi.fn(),
+		execute: vi.fn(),
+		insert: vi.fn(),
+		select: vi.fn(),
+		values: vi.fn(),
+	}),
+);
 
 vi.mock("@/lib/auth/session", () => ({ getSession }));
 vi.mock("@/lib/db", () => ({ db: { transaction } }));
@@ -56,10 +59,8 @@ function createTransaction(
 	const insertBuilder = queryBuilder(options.insertResult ?? []);
 	const selectBuilder = queryBuilder(options.selectResult ?? []);
 
-	insert.mockReturnValue({
-		values: vi.fn(() => insertBuilder),
-	});
-
+	values.mockReturnValue(insertBuilder);
+	insert.mockReturnValue({ values });
 	select.mockReturnValue(selectBuilder);
 
 	const tx = {
@@ -95,6 +96,7 @@ describe("GET /api/monitors", () => {
 		const monitors = [
 			{
 				id: "monitor-1",
+				projectId: "project-1",
 				name: "Website",
 				url: "https://example.com/",
 				enabled: true,
@@ -158,9 +160,10 @@ describe("POST /api/monitors", () => {
 		expect(response.status).toBe(400);
 	});
 
-	it("creates a monitor and returns 201", async () => {
+	it("creates a standalone monitor and returns 201", async () => {
 		const monitor = {
 			id: "monitor-1",
+			projectId: null,
 			name: "Website",
 			url: "https://example.com/",
 			enabled: true,
@@ -188,6 +191,92 @@ describe("POST /api/monitors", () => {
 		});
 		expect(execute).toHaveBeenCalledOnce();
 		expect(insert).toHaveBeenCalledOnce();
+		expect(values).toHaveBeenCalledWith({
+			ownerId: session.user.id,
+			projectId: null,
+			name: "Website",
+			url: "https://example.com/",
+		});
+		expect(select).not.toHaveBeenCalled();
+	});
+
+	it("creates a monitor assigned to an existing Project", async () => {
+		const monitor = {
+			id: "monitor-1",
+			projectId: "550e8400-e29b-41d4-a716-446655440000",
+			name: "API Health",
+			url: "https://example.com/api/health",
+			enabled: true,
+			createdAt: new Date("2026-01-01T00:00:00Z"),
+		};
+
+		createTransaction({
+			insertResult: [monitor],
+			selectResult: [{ id: "550e8400-e29b-41d4-a716-446655440000" }],
+		});
+
+		const response = await POST(
+			new Request("http://localhost/api/monitors", {
+				method: "POST",
+				body: JSON.stringify({
+					name: "API Health",
+					url: "https://example.com/api/health",
+					projectId: "550e8400-e29b-41d4-a716-446655440000",
+				}),
+			}),
+		);
+
+		expect(response.status).toBe(201);
+		expect(await json(response)).toEqual({
+			monitor: {
+				...monitor,
+				createdAt: monitor.createdAt.toISOString(),
+			},
+		});
+		expect(select).toHaveBeenCalledOnce();
+		expect(values).toHaveBeenCalledWith({
+			ownerId: session.user.id,
+			projectId: "550e8400-e29b-41d4-a716-446655440000",
+			name: "API Health",
+			url: "https://example.com/api/health",
+		});
+	});
+
+	it("rejects an invalid Project ID", async () => {
+		const response = await POST(
+			new Request("http://localhost/api/monitors", {
+				method: "POST",
+				body: JSON.stringify({
+					name: "API Health",
+					url: "https://example.com/api/health",
+					projectId: "invalid-id",
+				}),
+			}),
+		);
+
+		expect(response.status).toBe(400);
+		expect(await json(response)).toEqual({ error: "Invalid project ID" });
+		expect(insert).not.toHaveBeenCalled();
+	});
+
+	it("rejects a Project that does not belong to the user", async () => {
+		createTransaction({ selectResult: [] });
+
+		const response = await POST(
+			new Request("http://localhost/api/monitors", {
+				method: "POST",
+				body: JSON.stringify({
+					name: "API Health",
+					url: "https://example.com/api/health",
+					projectId: "11111111-1111-4111-8111-111111111111",
+				}),
+			}),
+		);
+
+		expect(response.status).toBe(404);
+		expect(await json(response)).toEqual({ error: "Project not found" });
+		expect(select).toHaveBeenCalledOnce();
+		expect(insert).not.toHaveBeenCalled();
 	});
 
 	it("rejects an invalid URL", async () => {

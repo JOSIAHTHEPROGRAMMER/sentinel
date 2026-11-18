@@ -2,10 +2,20 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type CreateResponse = {
 	monitor?: { id: string };
+	error?: string;
+};
+
+type Project = {
+	id: string;
+	name: string;
+};
+
+type ProjectsResponse = {
+	projects?: Project[];
 	error?: string;
 };
 
@@ -13,10 +23,50 @@ export default function NewMonitorPage() {
 	const router = useRouter();
 	const [name, setName] = useState("");
 	const [url, setUrl] = useState("");
+	const [projectId, setProjectId] = useState("");
+	const [projects, setProjects] = useState<Project[]>([]);
+	const [projectsLoading, setProjectsLoading] = useState(true);
+	const [projectsError, setProjectsError] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	async function handleSubmit(event: React.SubmitEvent<HTMLFormElement>) {
+	useEffect(() => {
+		const controller = new AbortController();
+
+		async function loadProjects() {
+			try {
+				const response = await fetch("/api/projects", {
+					signal: controller.signal,
+				});
+
+				const data: ProjectsResponse = await response.json();
+
+				if (!response.ok) {
+					throw new Error(data.error ?? "Unable to load projects.");
+				}
+
+				setProjects(data.projects ?? []);
+			} catch (cause) {
+				if (cause instanceof Error && cause.name === "AbortError") {
+					return;
+				}
+
+				setProjectsError(
+					cause instanceof Error ? cause.message : "Unable to load projects.",
+				);
+			} finally {
+				if (!controller.signal.aborted) {
+					setProjectsLoading(false);
+				}
+			}
+		}
+
+		loadProjects();
+
+		return () => controller.abort();
+	}, []);
+
+	async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
 		event.preventDefault();
 		setSaving(true);
 		setError(null);
@@ -25,7 +75,11 @@ export default function NewMonitorPage() {
 			const response = await fetch("/api/monitors", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ name, url }),
+				body: JSON.stringify({
+					name,
+					url,
+					projectId: projectId || null,
+				}),
 			});
 
 			const data: CreateResponse = await response.json();
@@ -109,6 +163,40 @@ export default function NewMonitorPage() {
 						Use an HTTP or HTTPS endpoint you are authorized to monitor. The
 						server validates the URL before saving it.
 					</p>
+				</div>
+
+				<div className="space-y-2">
+					<label
+						htmlFor="projectId"
+						className="block text-sm font-medium text-slate-200"
+					>
+						Project
+					</label>
+					<select
+						id="projectId"
+						name="projectId"
+						value={projectId}
+						onChange={(event) => setProjectId(event.target.value)}
+						disabled={projectsLoading}
+						className="w-full rounded-lg border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-400 disabled:cursor-wait disabled:opacity-50"
+					>
+						<option value="">Standalone</option>
+						{projects.map((project) => (
+							<option key={project.id} value={project.id}>
+								{project.name}
+							</option>
+						))}
+					</select>
+					<p className="text-xs leading-5 text-slate-500">
+						{projectsLoading
+							? "Loading your projects..."
+							: "Optionally assign this monitor to a project."}
+					</p>
+					{projectsError && (
+						<p role="alert" className="text-xs text-amber-300">
+							{projectsError} You can still create a standalone monitor.
+						</p>
+					)}
 				</div>
 
 				{error && (

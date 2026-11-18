@@ -1,18 +1,23 @@
 "use client";
-
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckHistory } from "@/features/checks/components/check-history";
 
 type Monitor = {
 	id: string;
 	name: string;
 	url: string;
+	projectId: string | null;
 	enabled: boolean;
 	intervalSeconds: number;
 	timeoutMs: number;
 	createdAt: string;
 	updatedAt: string;
+};
+
+type Project = {
+	id: string;
+	name: string;
 };
 
 type MonitorDetailsClientProps = {
@@ -21,6 +26,11 @@ type MonitorDetailsClientProps = {
 
 type MonitorResponse = {
 	monitor?: Omit<Monitor, "createdAt">;
+	error?: string;
+};
+
+type ProjectsResponse = {
+	projects?: Project[];
 	error?: string;
 };
 
@@ -33,6 +43,10 @@ export default function MonitorDetailsClient({
 	const [monitor, setMonitor] = useState<Monitor>(initialMonitor);
 	const [name, setName] = useState(initialMonitor.name);
 	const [url, setUrl] = useState(initialMonitor.url);
+	const [projectId, setProjectId] = useState(initialMonitor.projectId);
+	const [projects, setProjects] = useState<Project[]>([]);
+	const [projectsLoading, setProjectsLoading] = useState(true);
+	const [projectsError, setProjectsError] = useState("");
 	const [enabled, setEnabled] = useState(initialMonitor.enabled);
 	const [intervalSeconds, setIntervalSeconds] = useState(
 		String(initialMonitor.intervalSeconds),
@@ -43,6 +57,42 @@ export default function MonitorDetailsClient({
 	const [deleting, setDeleting] = useState(false);
 	const [error, setError] = useState("");
 	const [notice, setNotice] = useState("");
+
+	useEffect(() => {
+		const controller = new AbortController();
+
+		async function loadProjects() {
+			try {
+				const response = await fetch("/api/projects", {
+					signal: controller.signal,
+				});
+
+				const data: ProjectsResponse = await response.json();
+
+				if (!response.ok) {
+					throw new Error(data.error ?? "Unable to load projects.");
+				}
+
+				setProjects(data.projects ?? []);
+			} catch (cause) {
+				if (cause instanceof Error && cause.name === "AbortError") {
+					return;
+				}
+
+				setProjectsError(
+					cause instanceof Error ? cause.message : "Unable to load projects.",
+				);
+			} finally {
+				if (!controller.signal.aborted) {
+					setProjectsLoading(false);
+				}
+			}
+		}
+
+		loadProjects();
+
+		return () => controller.abort();
+	}, []);
 
 	async function handleSave(event: React.SubmitEvent<HTMLFormElement>) {
 		event.preventDefault();
@@ -72,6 +122,7 @@ export default function MonitorDetailsClient({
 				body: JSON.stringify({
 					name,
 					url,
+					projectId: projectId || null,
 					enabled,
 					intervalSeconds: interval,
 					timeoutMs: timeout,
@@ -88,6 +139,7 @@ export default function MonitorDetailsClient({
 				...current,
 				...data.monitor,
 			}));
+			setProjectId(data.monitor.projectId);
 			setNotice("Monitor settings saved.");
 		} catch (cause) {
 			setError(
@@ -179,6 +231,39 @@ export default function MonitorDetailsClient({
 					</p>
 				</div>
 
+				<div className="space-y-2">
+					<label
+						htmlFor="projectId"
+						className="block text-sm font-medium text-slate-200"
+					>
+						Project
+					</label>
+					<select
+						id="projectId"
+						value={projectId ?? ""}
+						onChange={(event) => setProjectId(event.target.value || null)}
+						disabled={projectsLoading}
+						className="w-full rounded-lg border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-400 disabled:cursor-wait disabled:opacity-50"
+					>
+						<option value="">Standalone</option>
+						{projects.map((project) => (
+							<option key={project.id} value={project.id}>
+								{project.name}
+							</option>
+						))}
+					</select>
+					<p className="text-xs leading-5 text-slate-500">
+						{projectsLoading
+							? "Loading your projects..."
+							: "Assign this monitor to a project or leave it standalone."}
+					</p>
+					{projectsError && (
+						<p role="alert" className="text-xs text-amber-300">
+							{projectsError} Project assignment is unavailable.
+						</p>
+					)}
+				</div>
+
 				<div className="grid gap-5 sm:grid-cols-2">
 					<div className="space-y-2">
 						<label
@@ -262,14 +347,14 @@ export default function MonitorDetailsClient({
 					<button
 						type="submit"
 						disabled={saving || deleting}
-						className="rounded-lg bg-cyan-400 px-5 py-2.5 text-sm font-semibold text-slate-950 cursor-pointer hover:bg-cyan-300 disabled:cursor-wait disabled:opacity-50"
+						className="cursor-pointer rounded-lg bg-cyan-400 px-5 py-2.5 text-sm font-semibold text-slate-950 hover:bg-cyan-300 disabled:cursor-wait disabled:opacity-50"
 					>
 						{saving ? "Saving..." : "Save changes"}
 					</button>
 				</div>
 			</form>
 
-			<section className="rounded-2xl border border-red-400/20 bg-red-400/3 p-5 sm:p-6">
+			<section className="flex flex-col items-center justify-center rounded-2xl border border-red-400/20 bg-red-400/3 p-5 text-center sm:p-6">
 				<h2 className="font-semibold text-red-200">Delete monitor</h2>
 				<p className="mt-2 text-sm leading-6 text-slate-400">
 					This removes the monitor from your active list. The server handles
@@ -279,7 +364,7 @@ export default function MonitorDetailsClient({
 					type="button"
 					onClick={handleDelete}
 					disabled={saving || deleting}
-					className="mt-4 rounded-lg border border-red-400/30 px-4 py-2.5 text-sm  cursor-pointer font-medium text-red-200 transition hover:bg-red-400/10 disabled:cursor-wait disabled:opacity-50"
+					className="mt-4 cursor-pointer rounded-lg border border-red-400/30 px-4 py-2.5 text-sm font-medium text-red-200 transition hover:bg-red-400/10 disabled:cursor-wait disabled:opacity-50"
 				>
 					{deleting ? "Deleting..." : "Delete monitor"}
 				</button>

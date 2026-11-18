@@ -1,6 +1,13 @@
 import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
+import {
+	bucketSecondsForRange,
+	buildBucketStarts,
+	calculateUptimePercentage,
+	parseAnalyticsRange,
+	rangeToMs,
+} from "@/lib/data/analytics-shared";
 import { db } from "@/lib/db";
 import { checkResults, monitors } from "@/lib/db/schema/app";
 
@@ -13,7 +20,7 @@ const UUID_PATTERN =
 
 const HISTORY_LIMIT = 50;
 
-export async function GET(_request: Request, { params }: RouteContext) {
+export async function GET(request: Request, { params }: RouteContext) {
 	const session = await getSession();
 
 	if (!session) {
@@ -25,6 +32,16 @@ export async function GET(_request: Request, { params }: RouteContext) {
 	if (!UUID_PATTERN.test(id)) {
 		return NextResponse.json({ error: "Invalid monitor ID" }, { status: 400 });
 	}
+
+	const range = parseAnalyticsRange(
+		new URL(request.url).searchParams.get("range") ?? undefined,
+	);
+
+	const now = Date.now();
+	const since = new Date(now - rangeToMs(range));
+	const bucketSeconds = bucketSecondsForRange(range);
+	const bucketStarts = buildBucketStarts(range, now);
+	const chartSince = new Date(bucketStarts[0] ?? since.getTime());
 
 	const result = await db.transaction(async (tx) => {
 		await tx.execute(
@@ -41,34 +58,39 @@ export async function GET(_request: Request, { params }: RouteContext) {
 			return null;
 		}
 
-		const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
 		const [summaryResult] = await tx
 			.select({
 				totalChecks: sql<number>`count(*)::int`,
-				successfulChecks: sql<number>`count(*) filter (where ${checkResults.status} = 'up')::int`,
-				averageResponseTime: sql<
+				successfulChecks: sql<number>`(count(*) filter (where ${checkResults.status} = 'up'))::int`,
+				averageLatencyMs: sql<
 					number | null
-				>`round(avg(${checkResults.latencyMs}) filter (where ${checkResults.latencyMs} is not null))::int`,
+				>`(round(avg(${checkResults.latencyMs}) filter (where ${checkResults.status} = 'up')))::int`,
 			})
 			.from(checkResults)
 			.where(
 				and(eq(checkResults.monitorId, id), gte(checkResults.checkedAt, since)),
 			);
 
-		const performanceChecks = await tx
+		const bucketIndex = sql<number>`floor(extract(epoch from ${checkResults.checkedAt}) / ${sql.raw(String(bucketSeconds))})::int`;
+
+		const bucketRows = await tx
 			.select({
-				id: checkResults.id,
-				checkedAt: checkResults.checkedAt,
-				status: checkResults.status,
-				latencyMs: checkResults.latencyMs,
+				bucket: bucketIndex,
+				total: sql<number>`count(*)::int`,
+				successful: sql<number>`(count(*) filter (where ${checkResults.status} = 'up'))::int`,
+				averageLatencyMs: sql<
+					number | null
+				>`(round(avg(${checkResults.latencyMs}) filter (where ${checkResults.status} = 'up')))::int`,
 			})
 			.from(checkResults)
 			.where(
-				and(eq(checkResults.monitorId, id), gte(checkResults.checkedAt, since)),
+				and(
+					eq(checkResults.monitorId, id),
+					gte(checkResults.checkedAt, chartSince),
+				),
 			)
-			.orderBy(desc(checkResults.checkedAt))
-			.limit(HISTORY_LIMIT);
+			.groupBy(bucketIndex)
+			.orderBy(bucketIndex);
 
 		const checks = await tx
 			.select({
@@ -84,20 +106,37 @@ export async function GET(_request: Request, { params }: RouteContext) {
 			.orderBy(desc(checkResults.checkedAt))
 			.limit(HISTORY_LIMIT);
 
+		const rowsByStart = new Map(
+			bucketRows.map((row) => [row.bucket * bucketSeconds * 1000, row]),
+		);
+
+		const buckets = bucketStarts.map((start) => {
+			const row = rowsByStart.get(start);
+
+			return {
+				start: new Date(start).toISOString(),
+				total: row?.total ?? 0,
+				successful: row?.successful ?? 0,
+				averageLatencyMs: row?.averageLatencyMs ?? null,
+			};
+		});
+
 		const totalChecks = summaryResult?.totalChecks ?? 0;
 		const successfulChecks = summaryResult?.successfulChecks ?? 0;
 
 		return {
 			checks,
-			performanceChecks,
+			buckets,
 			summary: {
+				range,
 				totalChecks,
 				successfulChecks,
-				uptimePercentage:
-					totalChecks > 0
-						? Number(((successfulChecks / totalChecks) * 100).toFixed(2))
-						: null,
-				averageResponseTime: summaryResult?.averageResponseTime ?? null,
+				failedChecks: totalChecks - successfulChecks,
+				uptimePercentage: calculateUptimePercentage(
+					successfulChecks,
+					totalChecks,
+				),
+				averageResponseTimeMs: summaryResult?.averageLatencyMs ?? null,
 			},
 		};
 	});

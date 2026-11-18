@@ -1,9 +1,12 @@
-import { isNull, sql } from "drizzle-orm";
+import { eq, isNull, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { monitors } from "@/lib/db/schema/app";
+import { monitors, projects } from "@/lib/db/schema/app";
 import { validateMonitorUrl } from "@/lib/validation/monitor-url";
+
+const UUID_REGEX =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: Request) {
 	const session = await getSession();
@@ -49,20 +52,50 @@ export async function POST(request: Request) {
 		return NextResponse.json({ error: urlResult.error }, { status: 400 });
 	}
 
-	const monitor = await db.transaction(async (tx) => {
+	let projectId: string | null = null;
+
+	if ("projectId" in body && body.projectId !== null) {
+		if (
+			typeof body.projectId !== "string" ||
+			!UUID_REGEX.test(body.projectId)
+		) {
+			return NextResponse.json(
+				{ error: "Invalid project ID" },
+				{ status: 400 },
+			);
+		}
+
+		projectId = body.projectId;
+	}
+
+	const result = await db.transaction(async (tx) => {
 		await tx.execute(
 			sql`SELECT set_config('app.user_id', ${session.user.id}, true)`,
 		);
+
+		if (projectId) {
+			const [project] = await tx
+				.select({ id: projects.id })
+				.from(projects)
+				.where(eq(projects.id, projectId))
+				.limit(1);
+
+			if (!project) {
+				return null;
+			}
+		}
 
 		const [createdMonitor] = await tx
 			.insert(monitors)
 			.values({
 				ownerId: session.user.id,
+				projectId,
 				name,
 				url: urlResult.url,
 			})
 			.returning({
 				id: monitors.id,
+				projectId: monitors.projectId,
 				name: monitors.name,
 				url: monitors.url,
 				enabled: monitors.enabled,
@@ -72,7 +105,11 @@ export async function POST(request: Request) {
 		return createdMonitor;
 	});
 
-	return NextResponse.json({ monitor }, { status: 201 });
+	if (!result) {
+		return NextResponse.json({ error: "Project not found" }, { status: 404 });
+	}
+
+	return NextResponse.json({ monitor: result }, { status: 201 });
 }
 
 export async function GET() {
@@ -90,6 +127,7 @@ export async function GET() {
 		return tx
 			.select({
 				id: monitors.id,
+				projectId: monitors.projectId,
 				name: monitors.name,
 				url: monitors.url,
 				enabled: monitors.enabled,

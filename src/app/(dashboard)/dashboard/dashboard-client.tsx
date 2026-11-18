@@ -1,8 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useTransition } from "react";
 import { LocalDate } from "@/components/ui/local-date";
+import {
+	ANALYTICS_RANGES,
+	type AnalyticsRange,
+	type AnalyticsSummary,
+} from "@/lib/data/analytics-shared";
 
 type Monitor = {
 	id: string;
@@ -15,13 +21,15 @@ type Monitor = {
 	updatedAt: string;
 };
 
-type MonitorResponse = {
-	monitors?: Monitor[];
-	error?: string;
+type DashboardClientProps = {
+	monitors: Monitor[];
+	analytics: AnalyticsSummary;
 };
 
-type DashboardClientProps = {
-	initialMonitors: Monitor[];
+const RANGE_LABELS: Record<AnalyticsRange, string> = {
+	"24h": "Last 24 hours",
+	"7d": "Last 7 days",
+	"30d": "Last 30 days",
 };
 
 function formatInterval(seconds: number): string {
@@ -57,60 +65,27 @@ function SummaryCard({
 }
 
 export default function DashboardClient({
-	initialMonitors,
+	monitors,
+	analytics,
 }: DashboardClientProps) {
-	const [monitors, setMonitors] = useState(initialMonitors);
-	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-	const controllerRef = useRef<AbortController | null>(null);
+	const router = useRouter();
+	const [isPending, startTransition] = useTransition();
 
-	const loadMonitors = useCallback(async () => {
-		controllerRef.current?.abort();
+	function refresh() {
+		startTransition(() => {
+			router.refresh();
+		});
+	}
 
-		const controller = new AbortController();
-		controllerRef.current = controller;
-
-		setLoading(true);
-		setError(null);
-
-		try {
-			const response = await fetch("/api/monitors", {
-				method: "GET",
-				cache: "no-store",
-				signal: controller.signal,
-			});
-
-			const data: MonitorResponse = await response.json();
-
-			if (!response.ok) {
-				if (response.status === 401) {
-					throw new Error("Your session has expired or you are not signed in.");
-				}
-
-				throw new Error(data.error ?? "Unable to load your monitors.");
-			}
-
-			if (!Array.isArray(data.monitors)) {
-				throw new Error("The server returned an unexpected monitor response.");
-			}
-
-			setMonitors(data.monitors);
-		} catch (cause) {
-			if (controller.signal.aborted) {
-				return;
-			}
-
-			setError(
-				cause instanceof Error
-					? cause.message
-					: "Something went wrong while loading monitors.",
-			);
-		} finally {
-			if (!controller.signal.aborted) {
-				setLoading(false);
-			}
+	function changeRange(range: AnalyticsRange) {
+		if (range === analytics.range) {
+			return;
 		}
-	}, []);
+
+		startTransition(() => {
+			router.push(`/dashboard?range=${range}`, { scroll: false });
+		});
+	}
 
 	const enabledCount = monitors.filter((monitor) => monitor.enabled).length;
 	const disabledCount = monitors.length - enabledCount;
@@ -125,6 +100,8 @@ export default function DashboardClient({
 				)
 			: null;
 
+	const hasChecks = analytics.totalChecks > 0;
+
 	return (
 		<div className="space-y-8">
 			<section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -134,41 +111,88 @@ export default function DashboardClient({
 						Monitoring overview
 					</h1>
 					<p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-						Manage your monitored endpoints and review their configuration from
-						one place.
+						Review how your endpoints are performing and manage their
+						configuration from one place.
 					</p>
 				</div>
 
 				<button
 					type="button"
-					onClick={loadMonitors}
-					disabled={loading}
+					onClick={refresh}
+					disabled={isPending}
 					className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/5 disabled:cursor-wait disabled:opacity-50"
 				>
-					{loading ? "Refreshing..." : "Refresh data"}
+					{isPending ? "Refreshing..." : "Refresh data"}
 				</button>
 			</section>
 
-			{error && (
-				<section
-					role="alert"
-					className="flex flex-col gap-3 rounded-xl border border-red-400/20 bg-red-400/5 p-4 sm:flex-row sm:items-center sm:justify-between"
-				>
+			<section
+				aria-label="Performance"
+				className={`space-y-4 transition-opacity ${isPending ? "opacity-60" : ""}`}
+			>
+				<div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
 					<div>
-						<p className="font-medium text-red-300">
-							Could not load dashboard data
+						<h2 className="text-lg font-semibold text-white">Performance</h2>
+						<p className="mt-1 text-sm text-slate-400">
+							{RANGE_LABELS[analytics.range]}
 						</p>
-						<p className="mt-1 text-sm text-slate-400">{error}</p>
 					</div>
-					<button
-						type="button"
-						onClick={loadMonitors}
-						className="self-start rounded-lg border border-red-400/20 px-3 py-2 text-sm text-red-200 hover:bg-red-400/10 sm:self-center"
-					>
-						Try again
-					</button>
-				</section>
-			)}
+
+					<fieldset className="m-0 inline-flex min-w-0 self-start rounded-lg border border-white/10 p-1">
+						<legend className="sr-only">Time range</legend>
+						{ANALYTICS_RANGES.map((range) => (
+							<button
+								key={range}
+								type="button"
+								aria-pressed={analytics.range === range}
+								onClick={() => changeRange(range)}
+								className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+									analytics.range === range
+										? "bg-cyan-400 text-slate-950"
+										: "text-slate-300 hover:bg-white/5"
+								}`}
+							>
+								{range}
+							</button>
+						))}
+					</fieldset>
+				</div>
+
+				<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+					<SummaryCard
+						label="Uptime"
+						value={
+							analytics.uptimePercentage === null
+								? "N/A"
+								: `${analytics.uptimePercentage.toFixed(2)}%`
+						}
+						description={
+							hasChecks
+								? `${analytics.successfulChecks} of ${analytics.totalChecks} checks succeeded`
+								: "No checks recorded in this period"
+						}
+					/>
+					<SummaryCard
+						label="Average response time"
+						value={
+							analytics.averageResponseTimeMs === null
+								? "N/A"
+								: `${analytics.averageResponseTimeMs} ms`
+						}
+						description="Successful checks only"
+					/>
+					<SummaryCard
+						label="Checks"
+						value={analytics.totalChecks}
+						description={`${analytics.failedChecks} failed in this period`}
+					/>
+					<SummaryCard
+						label="Open incidents"
+						value={analytics.openIncidents}
+						description={`${analytics.incidentsStarted} started, ${analytics.incidentsResolved} resolved in this period`}
+					/>
+				</div>
+			</section>
 
 			<section
 				aria-label="Monitor summary"
@@ -176,27 +200,23 @@ export default function DashboardClient({
 			>
 				<SummaryCard
 					label="Total monitors"
-					value={loading && monitors.length === 0 ? "..." : monitors.length}
+					value={monitors.length}
 					description="Your configured endpoints"
 				/>
 				<SummaryCard
 					label="Enabled"
-					value={loading && monitors.length === 0 ? "..." : enabledCount}
+					value={enabledCount}
 					description="Configured to run checks"
 				/>
 				<SummaryCard
 					label="Disabled"
-					value={loading && monitors.length === 0 ? "..." : disabledCount}
+					value={disabledCount}
 					description="Checks are switched off"
 				/>
 				<SummaryCard
 					label="Average interval"
 					value={
-						loading && monitors.length === 0
-							? "..."
-							: averageInterval === null
-								? "N/A"
-								: formatInterval(averageInterval)
+						averageInterval === null ? "N/A" : formatInterval(averageInterval)
 					}
 					description="Across all configured monitors"
 				/>
@@ -215,26 +235,7 @@ export default function DashboardClient({
 					</span>
 				</div>
 
-				{loading && monitors.length === 0 ? (
-					<div
-						role="status"
-						aria-label="Loading monitors"
-						className="space-y-3 p-6"
-					>
-						{[1, 2, 3].map((item) => (
-							<div
-								key={item}
-								className="h-16 animate-pulse rounded-lg bg-white/5"
-							/>
-						))}
-					</div>
-				) : error && monitors.length === 0 ? (
-					<div className="px-6 py-12 text-center">
-						<p className="text-sm text-slate-400">
-							Monitor information is unavailable until the request succeeds.
-						</p>
-					</div>
-				) : monitors.length === 0 ? (
+				{monitors.length === 0 ? (
 					<div className="px-6 py-14 text-center">
 						<div className="mx-auto flex size-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-xl text-cyan-300">
 							◎
@@ -324,9 +325,10 @@ export default function DashboardClient({
 			</section>
 
 			<p className="text-xs leading-5 text-slate-500">
-				Enabled means checks are configured to run. Actual uptime, response
-				times, and incidents will be displayed once the dashboard is connected
-				to recorded check history.
+				Uptime counts successful checks as up. Timeouts and failed checks count
+				as down. Response time is averaged over successful checks only. Open
+				incidents is the current count and does not depend on the selected
+				period.
 			</p>
 		</div>
 	);

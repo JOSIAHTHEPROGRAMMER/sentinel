@@ -8,6 +8,7 @@ import { authClient } from "@/lib/auth/client";
 const navigation = [
 	{ label: "Overview", href: "/dashboard", icon: "◫" },
 	{ label: "Monitors", href: "/monitors", icon: "◎" },
+	{ label: "Projects", href: "/projects", icon: "▦" },
 	{ label: "Incidents", href: "/incidents", icon: "△" },
 	{ label: "Settings", href: null, icon: "⚙" },
 ];
@@ -70,8 +71,8 @@ export function DashboardShell({
 						const active =
 							item.href !== null &&
 							(pathname === item.href ||
-								(item.href === "/monitors" &&
-									pathname.startsWith("/monitors/")));
+								(item.href !== "/dashboard" &&
+									pathname.startsWith(`${item.href}/`)));
 
 						const className = `flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium ${
 							active
@@ -133,7 +134,7 @@ export function DashboardShell({
 							type="button"
 							onClick={handleSignOut}
 							disabled={signingOut}
-							className=" cursor-pointer rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+							className="cursor-pointer rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
 						>
 							{signingOut ? "Signing out..." : "Sign out"}
 						</button>

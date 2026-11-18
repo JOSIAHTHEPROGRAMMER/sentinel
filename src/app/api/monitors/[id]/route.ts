@@ -2,12 +2,15 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { monitors } from "@/lib/db/schema/app";
+import { monitors, projects } from "@/lib/db/schema/app";
 import { validateMonitorUrl } from "@/lib/validation/monitor-url";
 
 type RouteContext = {
 	params: Promise<{ id: string }>;
 };
+
+const UUID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(_request: Request, { params }: RouteContext) {
 	const session = await getSession();
@@ -18,10 +21,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
 
 	const { id } = await params;
 
-	const isUuid =
-		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-
-	if (!isUuid) {
+	if (!UUID_PATTERN.test(id)) {
 		return NextResponse.json({ error: "Invalid monitor ID" }, { status: 400 });
 	}
 
@@ -35,6 +35,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
 				id: monitors.id,
 				name: monitors.name,
 				url: monitors.url,
+				projectId: monitors.projectId,
 				enabled: monitors.enabled,
 				intervalSeconds: monitors.intervalSeconds,
 				timeoutMs: monitors.timeoutMs,
@@ -64,10 +65,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
 	const { id } = await params;
 
-	const isUuid =
-		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-
-	if (!isUuid) {
+	if (!UUID_PATTERN.test(id)) {
 		return NextResponse.json({ error: "Invalid monitor ID" }, { status: 400 });
 	}
 
@@ -93,6 +91,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 		"enabled",
 		"intervalSeconds",
 		"timeoutMs",
+		"projectId",
 	];
 
 	const keys = Object.keys(input);
@@ -110,6 +109,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 		enabled?: boolean;
 		intervalSeconds?: number;
 		timeoutMs?: number;
+		projectId?: string | null;
 		updatedAt?: Date;
 	} = {};
 
@@ -181,14 +181,41 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 		updates.timeoutMs = input.timeoutMs;
 	}
 
+	if ("projectId" in input) {
+		if (
+			input.projectId !== null &&
+			(typeof input.projectId !== "string" ||
+				!UUID_PATTERN.test(input.projectId))
+		) {
+			return NextResponse.json(
+				{ error: "Invalid project ID" },
+				{ status: 400 },
+			);
+		}
+
+		updates.projectId = input.projectId as string | null;
+	}
+
 	updates.updatedAt = new Date();
 
-	const updatedMonitor = await db.transaction(async (tx) => {
+	const result = await db.transaction(async (tx) => {
 		await tx.execute(
 			sql`SELECT set_config('app.user_id', ${session.user.id}, true)`,
 		);
 
-		const [result] = await tx
+		if (updates.projectId) {
+			const [project] = await tx
+				.select({ id: projects.id })
+				.from(projects)
+				.where(eq(projects.id, updates.projectId))
+				.limit(1);
+
+			if (!project) {
+				return { projectNotFound: true as const, monitor: null };
+			}
+		}
+
+		const [updatedMonitor] = await tx
 			.update(monitors)
 			.set(updates)
 			.where(and(eq(monitors.id, id), isNull(monitors.deletedAt)))
@@ -196,20 +223,28 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 				id: monitors.id,
 				name: monitors.name,
 				url: monitors.url,
+				projectId: monitors.projectId,
 				enabled: monitors.enabled,
 				intervalSeconds: monitors.intervalSeconds,
 				timeoutMs: monitors.timeoutMs,
 				updatedAt: monitors.updatedAt,
 			});
 
-		return result;
+		return {
+			projectNotFound: false as const,
+			monitor: updatedMonitor ?? null,
+		};
 	});
 
-	if (!updatedMonitor) {
+	if (result.projectNotFound) {
+		return NextResponse.json({ error: "Project not found" }, { status: 404 });
+	}
+
+	if (!result.monitor) {
 		return NextResponse.json({ error: "Monitor not found" }, { status: 404 });
 	}
 
-	return NextResponse.json({ monitor: updatedMonitor });
+	return NextResponse.json({ monitor: result.monitor });
 }
 
 export async function DELETE(_request: Request, { params }: RouteContext) {
@@ -221,10 +256,7 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
 
 	const { id } = await params;
 
-	const isUuid =
-		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-
-	if (!isUuid) {
+	if (!UUID_PATTERN.test(id)) {
 		return NextResponse.json({ error: "Invalid monitor ID" }, { status: 400 });
 	}
 

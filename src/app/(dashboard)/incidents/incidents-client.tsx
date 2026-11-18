@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LocalDate } from "@/components/ui/local-date";
+import { formatDurationMs } from "@/lib/format-duration";
 
 type Incident = {
 	id: string;
 	monitorId: string;
 	monitorName: string;
 	monitorUrl: string;
+	projectName: string | null;
 	startedAt: string;
 	resolvedAt: string | null;
 	reason: string;
@@ -37,21 +39,7 @@ function formatDuration(
 		return "Unknown";
 	}
 
-	const minutes = Math.floor((end - start) / 60_000);
-
-	if (minutes < 60) {
-		return `${minutes}m`;
-	}
-
-	const hours = Math.floor(minutes / 60);
-	const remainingMinutes = minutes % 60;
-
-	if (hours < 24) {
-		return `${hours}h ${remainingMinutes}m`;
-	}
-
-	const days = Math.floor(hours / 24);
-	return `${days}d ${hours % 24}h`;
+	return formatDurationMs(end - start);
 }
 
 export default function IncidentsClient({
@@ -60,6 +48,15 @@ export default function IncidentsClient({
 }: IncidentsClientProps) {
 	const [incidents] = useState<Incident[]>(initialIncidents);
 	const [filter, setFilter] = useState<Filter>("all");
+	const [now, setNow] = useState(initialNow);
+
+	useEffect(() => {
+		const interval = window.setInterval(() => {
+			setNow(Date.now());
+		}, 60_000);
+
+		return () => window.clearInterval(interval);
+	}, []);
 
 	const filteredIncidents = incidents.filter((incident) => {
 		if (filter === "open") {
@@ -160,7 +157,13 @@ export default function IncidentsClient({
 									<div className="flex flex-wrap items-start justify-between gap-3">
 										<div className="min-w-0">
 											<h3 className="font-medium">{incident.monitorName}</h3>
-											<p className="mt-1 break-all text-sm text-slate-400">
+											<p className="mt-1 text-xs text-slate-500">
+												Project:{" "}
+												<span className="text-cyan-300">
+													{incident.projectName ?? "Standalone"}
+												</span>
+											</p>
+											<p className="mt-2 break-all text-sm text-slate-400">
 												{incident.monitorUrl}
 											</p>
 										</div>
@@ -196,7 +199,7 @@ export default function IncidentsClient({
 												{formatDuration(
 													incident.startedAt,
 													incident.resolvedAt,
-													initialNow,
+													now,
 												)}
 											</p>
 										</div>
