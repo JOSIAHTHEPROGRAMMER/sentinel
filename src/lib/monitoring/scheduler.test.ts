@@ -258,4 +258,86 @@ describe("monitor scheduler", () => {
 
 		expect(runCheck).toHaveBeenCalledTimes(2);
 	});
+
+	it("never runs more than the configured number of checks at once", async () => {
+		const pending = [deferred<void>(), deferred<void>(), deferred<void>()];
+		let started = 0;
+
+		eligibleMonitors = [
+			{ id: "m-1", intervalSeconds: 60 },
+			{ id: "m-2", intervalSeconds: 60 },
+			{ id: "m-3", intervalSeconds: 60 },
+		];
+
+		runCheck.mockImplementation(() => {
+			const check = pending[started];
+			started += 1;
+			return check?.promise ?? Promise.resolve();
+		});
+
+		const scheduler = createMonitorScheduler({
+			getEligibleMonitors,
+			runCheck,
+			now: () => now,
+			onError,
+			maxConcurrentChecks: 2,
+		});
+
+		await scheduler.poll();
+
+		expect(runCheck).toHaveBeenCalledTimes(2);
+
+		for (const check of pending) {
+			check.resolve();
+		}
+
+		await scheduler.waitForIdle();
+	});
+
+	it("starts the monitors skipped by the cap on the next poll", async () => {
+		eligibleMonitors = [
+			{ id: "m-1", intervalSeconds: 3600 },
+			{ id: "m-2", intervalSeconds: 3600 },
+			{ id: "m-3", intervalSeconds: 3600 },
+		];
+
+		const scheduler = createMonitorScheduler({
+			getEligibleMonitors,
+			runCheck,
+			now: () => now,
+			onError,
+			maxConcurrentChecks: 2,
+		});
+
+		await scheduler.poll();
+		await scheduler.waitForIdle();
+
+		expect(runCheck).toHaveBeenCalledTimes(2);
+
+		now += 15_000;
+		await scheduler.poll();
+		await scheduler.waitForIdle();
+
+		expect(runCheck).toHaveBeenCalledTimes(3);
+		expect(runCheck).toHaveBeenLastCalledWith("m-3");
+	});
+
+	it("applies a shortened interval on the next poll", async () => {
+		eligibleMonitors = [{ id: "monitor-1", intervalSeconds: 86_400 }];
+
+		const scheduler = createScheduler();
+
+		await scheduler.poll();
+		await scheduler.waitForIdle();
+
+		expect(runCheck).toHaveBeenCalledOnce();
+
+		eligibleMonitors = [{ id: "monitor-1", intervalSeconds: 60 }];
+		now += 60_000;
+
+		await scheduler.poll();
+		await scheduler.waitForIdle();
+
+		expect(runCheck).toHaveBeenCalledTimes(2);
+	});
 });
