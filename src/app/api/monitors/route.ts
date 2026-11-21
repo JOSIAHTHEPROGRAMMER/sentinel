@@ -3,10 +3,19 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { monitors, projects } from "@/lib/db/schema/app";
+import {
+	checkRateLimit,
+	rateLimitResponse,
+	WRITE_POLICY,
+} from "@/lib/rate-limit";
 import { validateMonitorUrl } from "@/lib/validation/monitor-url";
 
 const UUID_REGEX =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const MAX_MONITORS_PER_USER = 50;
+const MAX_BODY_BYTES = 8 * 1024;
+const ALLOWED_FIELDS = ["name", "url", "projectId"];
 
 export async function POST(request: Request) {
 	const session = await getSession();
@@ -15,10 +24,34 @@ export async function POST(request: Request) {
 		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 	}
 
+	const rateLimit = await checkRateLimit(WRITE_POLICY, session.user.id);
+
+	if (!rateLimit.allowed) {
+		return rateLimitResponse(rateLimit.retryAfterSeconds);
+	}
+
+	const declaredLength = Number(request.headers.get("content-length"));
+
+	if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+		return NextResponse.json(
+			{ error: "Request body too large" },
+			{ status: 413 },
+		);
+	}
+
 	let body: unknown;
 
 	try {
-		body = await request.json();
+		const raw = await request.text();
+
+		if (raw.length > MAX_BODY_BYTES) {
+			return NextResponse.json(
+				{ error: "Request body too large" },
+				{ status: 413 },
+			);
+		}
+
+		body = JSON.parse(raw);
 	} catch {
 		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
@@ -33,6 +66,13 @@ export async function POST(request: Request) {
 	) {
 		return NextResponse.json(
 			{ error: "A monitor name and URL are required" },
+			{ status: 400 },
+		);
+	}
+
+	if (Object.keys(body).some((key) => !ALLOWED_FIELDS.includes(key))) {
+		return NextResponse.json(
+			{ error: "Only name, url and projectId are supported" },
 			{ status: 400 },
 		);
 	}
@@ -73,6 +113,15 @@ export async function POST(request: Request) {
 			sql`SELECT set_config('app.user_id', ${session.user.id}, true)`,
 		);
 
+		const [usage] = await tx
+			.select({ total: sql<number>`count(*)::int` })
+			.from(monitors)
+			.where(isNull(monitors.deletedAt));
+
+		if ((usage?.total ?? 0) >= MAX_MONITORS_PER_USER) {
+			return { status: "limit" as const };
+		}
+
 		if (projectId) {
 			const [project] = await tx
 				.select({ id: projects.id })
@@ -81,7 +130,7 @@ export async function POST(request: Request) {
 				.limit(1);
 
 			if (!project) {
-				return null;
+				return { status: "no-project" as const };
 			}
 		}
 
@@ -102,14 +151,23 @@ export async function POST(request: Request) {
 				createdAt: monitors.createdAt,
 			});
 
-		return createdMonitor;
+		return { status: "created" as const, monitor: createdMonitor };
 	});
 
-	if (!result) {
+	if (result.status === "limit") {
+		return NextResponse.json(
+			{
+				error: `You can have up to ${MAX_MONITORS_PER_USER} monitors. Delete one to add another.`,
+			},
+			{ status: 403 },
+		);
+	}
+
+	if (result.status === "no-project") {
 		return NextResponse.json({ error: "Project not found" }, { status: 404 });
 	}
 
-	return NextResponse.json({ monitor: result }, { status: 201 });
+	return NextResponse.json({ monitor: result.monitor }, { status: 201 });
 }
 
 export async function GET() {
