@@ -43,15 +43,16 @@ export function validateMonitorUrl(value: unknown): MonitorUrlValidation {
 	}
 
 	const hostname = parsedUrl.hostname.toLowerCase();
+	const nameForFilter = hostname.replace(/\.+$/, "");
 
 	if (
 		!["http:", "https:"].includes(parsedUrl.protocol) ||
 		parsedUrl.username !== "" ||
 		parsedUrl.password !== "" ||
-		hostname === "localhost" ||
-		hostname.endsWith(".localhost") ||
-		hostname.endsWith(".local") ||
-		hostname.endsWith(".internal") ||
+		nameForFilter === "localhost" ||
+		nameForFilter.endsWith(".localhost") ||
+		nameForFilter.endsWith(".local") ||
+		nameForFilter.endsWith(".internal") ||
 		!isPublicAddress(hostname)
 	) {
 		return { valid: false, error: "URL is not allowed" };

@@ -129,4 +129,44 @@ describe("validateMonitorTarget", () => {
 			expect(result, address).toMatchObject({ valid: false });
 		}
 	});
+	it("rejects loopback, link-local, metadata, shared and NAT64 addresses", async () => {
+		for (const address of [
+			"127.0.0.1",
+			"169.254.169.254",
+			"100.64.0.1",
+			"0.0.0.0",
+			"::",
+			"::1",
+			"fe80::1",
+			"fd00::1",
+			"::ffff:7f00:1",
+			"64:ff9b::7f00:1",
+		]) {
+			mockLookupResults([
+				{
+					address,
+					family: address.includes(":") ? 6 : 4,
+				},
+			]);
+
+			const result = await validateMonitorTarget("https://example.com");
+
+			expect(result, address).toMatchObject({ valid: false });
+		}
+	});
+
+	it("rejects local hostnames written with a trailing dot without DNS lookup", async () => {
+		for (const url of [
+			"http://localhost./",
+			"http://service.localhost./",
+			"http://printer.local./",
+			"http://database.internal./",
+		]) {
+			const result = await validateMonitorTarget(url);
+
+			expect(result, url).toMatchObject({ valid: false });
+		}
+
+		expect(mockedLookup).not.toHaveBeenCalled();
+	});
 });

@@ -67,12 +67,13 @@ export async function validateMonitorTarget(
 	}
 
 	const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+	const nameForFilter = hostname.replace(/\.+$/, "");
 
 	if (
-		hostname === "localhost" ||
-		hostname.endsWith(".localhost") ||
-		hostname.endsWith(".local") ||
-		hostname.endsWith(".internal")
+		nameForFilter === "localhost" ||
+		nameForFilter.endsWith(".localhost") ||
+		nameForFilter.endsWith(".local") ||
+		nameForFilter.endsWith(".internal")
 	) {
 		return { valid: false, error: "URL is not allowed" };
 	}

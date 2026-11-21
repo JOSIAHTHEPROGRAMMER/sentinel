@@ -132,7 +132,7 @@ export default function DashboardClient({
 					type="button"
 					onClick={refresh}
 					disabled={isPending}
-					className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/5 disabled:cursor-wait disabled:opacity-50"
+					className="inline-flex cursor-pointer min-h-10 items-center justify-center rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/5 disabled:cursor-wait disabled:opacity-50"
 				>
 					{isPending ? "Refreshing..." : "Refresh data"}
 				</button>

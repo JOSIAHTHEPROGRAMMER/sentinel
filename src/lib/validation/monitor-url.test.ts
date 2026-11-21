@@ -90,4 +90,29 @@ describe("validateMonitorUrl", () => {
 			url: "https://example.com/",
 		});
 	});
+
+	it("rejects shared, NAT64 and alternate-notation loopback addresses", () => {
+		for (const url of [
+			"http://100.64.0.1",
+			"http://[64:ff9b::7f00:1]",
+			"http://[::ffff:7f00:1]",
+			"http://[fd00::1]",
+			"http://2130706433",
+			"http://0x7f.1",
+			"http://0177.0.0.1",
+			"http://127.1",
+		]) {
+			expect(validateMonitorUrl(url), url).toMatchObject({ valid: false });
+		}
+	});
+	it("rejects local hostnames written with a trailing dot", () => {
+		for (const url of [
+			"http://localhost./",
+			"http://service.localhost./",
+			"http://printer.local./",
+			"http://database.internal./",
+		]) {
+			expect(validateMonitorUrl(url), url).toMatchObject({ valid: false });
+		}
+	});
 });
