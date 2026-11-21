@@ -4,7 +4,16 @@ import { workerDb } from "@/lib/db/worker";
 import { checkHttpTarget } from "./http-check";
 import { recordMonitorCheck } from "./record-check";
 
-export async function runMonitorCheck(monitorId: string): Promise<void> {
+export type MonitorCheckSummary = {
+	success: boolean;
+	statusCode: number | null;
+	responseTimeMs: number;
+	error?: string;
+};
+
+export async function runMonitorCheck(
+	monitorId: string,
+): Promise<MonitorCheckSummary | null> {
 	const [monitor] = await workerDb
 		.select({
 			id: monitors.id,
@@ -22,7 +31,7 @@ export async function runMonitorCheck(monitorId: string): Promise<void> {
 		.limit(1);
 
 	if (!monitor) {
-		return;
+		return null;
 	}
 
 	const result = await checkHttpTarget(monitor.url, monitor.timeoutMs);
@@ -31,4 +40,11 @@ export async function runMonitorCheck(monitorId: string): Promise<void> {
 		monitorId: monitor.id,
 		result,
 	});
+
+	return {
+		success: result.success,
+		statusCode: result.statusCode,
+		responseTimeMs: result.responseTimeMs,
+		error: result.error,
+	};
 }
