@@ -4,6 +4,11 @@ import { getSession } from "@/lib/auth/session";
 import { getProjectForUser } from "@/lib/data/projects";
 import { db } from "@/lib/db";
 import { monitors, projects } from "@/lib/db/schema/app";
+import {
+	checkRateLimit,
+	rateLimitResponse,
+	WRITE_POLICY,
+} from "@/lib/rate-limit";
 
 type RouteContext = {
 	params: Promise<{ id: string }>;
@@ -42,6 +47,12 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 	}
 
 	const { id } = await params;
+
+	const rateLimit = await checkRateLimit(WRITE_POLICY, session.user.id);
+
+	if (!rateLimit.allowed) {
+		return rateLimitResponse(rateLimit.retryAfterSeconds);
+	}
 
 	if (!UUID_PATTERN.test(id)) {
 		return NextResponse.json({ error: "Invalid project ID" }, { status: 400 });
@@ -121,6 +132,12 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
 	}
 
 	const { id } = await params;
+
+	const rateLimit = await checkRateLimit(WRITE_POLICY, session.user.id);
+
+	if (!rateLimit.allowed) {
+		return rateLimitResponse(rateLimit.retryAfterSeconds);
+	}
 
 	if (!UUID_PATTERN.test(id)) {
 		return NextResponse.json({ error: "Invalid project ID" }, { status: 400 });

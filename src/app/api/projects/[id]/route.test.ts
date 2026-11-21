@@ -1,17 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getSession, transaction, execute, select, update, deleteMock } =
-	vi.hoisted(() => ({
-		getSession: vi.fn(),
-		transaction: vi.fn(),
-		execute: vi.fn(),
-		select: vi.fn(),
-		update: vi.fn(),
-		deleteMock: vi.fn(),
-	}));
+const {
+	getSession,
+	transaction,
+	execute,
+	select,
+	update,
+	deleteMock,
+	checkRateLimit,
+} = vi.hoisted(() => ({
+	getSession: vi.fn(),
+	transaction: vi.fn(),
+	execute: vi.fn(),
+	select: vi.fn(),
+	update: vi.fn(),
+	deleteMock: vi.fn(),
+	checkRateLimit: vi.fn(),
+}));
 
 vi.mock("@/lib/auth/session", () => ({ getSession }));
 vi.mock("@/lib/db", () => ({ db: { transaction } }));
+vi.mock("@/lib/rate-limit", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/lib/rate-limit")>()),
+	checkRateLimit,
+}));
 
 import { DELETE, GET, PATCH } from "./route";
 
@@ -149,6 +161,7 @@ async function json(response: Response) {
 beforeEach(() => {
 	vi.clearAllMocks();
 	getSession.mockResolvedValue(session);
+	checkRateLimit.mockResolvedValue({ allowed: true });
 	createTransaction();
 });
 
@@ -342,6 +355,24 @@ describe("PATCH /api/projects/[id]", () => {
 
 		expect(response.status).toBe(404);
 	});
+
+	it("returns 429 on PATCH and never reaches the database when rate limited", async () => {
+		checkRateLimit.mockResolvedValue({ allowed: false, retryAfterSeconds: 4 });
+
+		const response = await PATCH(
+			makeRequest(JSON.stringify({ name: "Updated Website" }), "PATCH"),
+			context,
+		);
+
+		expect(response.status).toBe(429);
+		expect(response.headers.get("Retry-After")).toBe("4");
+		expect(checkRateLimit).toHaveBeenCalledWith(
+			expect.objectContaining({ name: "write" }),
+			session.user.id,
+		);
+		expect(transaction).not.toHaveBeenCalled();
+		expect(update).not.toHaveBeenCalled();
+	});
 });
 
 describe("DELETE /api/projects/[id]", () => {
@@ -388,6 +419,17 @@ describe("DELETE /api/projects/[id]", () => {
 		});
 
 		expect(update).not.toHaveBeenCalled();
+		expect(deleteMock).not.toHaveBeenCalled();
+	});
+
+	it("returns 429 on DELETE and never reaches the database when rate limited", async () => {
+		checkRateLimit.mockResolvedValue({ allowed: false, retryAfterSeconds: 4 });
+
+		const response = await DELETE(new Request("http://localhost"), context);
+
+		expect(response.status).toBe(429);
+		expect(response.headers.get("Retry-After")).toBe("4");
+		expect(transaction).not.toHaveBeenCalled();
 		expect(deleteMock).not.toHaveBeenCalled();
 	});
 });

@@ -1,15 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getSession, transaction, execute, insert, select } = vi.hoisted(() => ({
-	getSession: vi.fn(),
-	transaction: vi.fn(),
-	execute: vi.fn(),
-	insert: vi.fn(),
-	select: vi.fn(),
-}));
+const { getSession, transaction, execute, insert, select, checkRateLimit } =
+	vi.hoisted(() => ({
+		getSession: vi.fn(),
+		transaction: vi.fn(),
+		execute: vi.fn(),
+		insert: vi.fn(),
+		select: vi.fn(),
+		checkRateLimit: vi.fn(),
+	}));
 
 vi.mock("@/lib/auth/session", () => ({ getSession }));
 vi.mock("@/lib/db", () => ({ db: { transaction } }));
+vi.mock("@/lib/rate-limit", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/lib/rate-limit")>()),
+	checkRateLimit,
+}));
 
 import { GET, POST } from "./route";
 
@@ -79,6 +85,7 @@ describe("GET /api/projects", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		getSession.mockResolvedValue(session);
+		checkRateLimit.mockResolvedValue({ allowed: true });
 		createTransaction();
 	});
 
@@ -137,6 +144,7 @@ describe("POST /api/projects", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		getSession.mockResolvedValue(session);
+		checkRateLimit.mockResolvedValue({ allowed: true });
 		createTransaction();
 	});
 
@@ -229,5 +237,49 @@ describe("POST /api/projects", () => {
 
 		expect(execute).toHaveBeenCalledOnce();
 		expect(insert).toHaveBeenCalledOnce();
+	});
+
+	it("rate limits by user id", async () => {
+		await POST(
+			new Request("http://localhost/api/projects", {
+				method: "POST",
+				body: JSON.stringify({ name: "Website" }),
+			}),
+		);
+
+		expect(checkRateLimit).toHaveBeenCalledWith(
+			expect.objectContaining({ name: "write" }),
+			session.user.id,
+		);
+	});
+
+	it("returns 429 with Retry-After and never reaches the database when limited", async () => {
+		checkRateLimit.mockResolvedValue({ allowed: false, retryAfterSeconds: 6 });
+
+		const response = await POST(
+			new Request("http://localhost/api/projects", {
+				method: "POST",
+				body: JSON.stringify({ name: "Website" }),
+			}),
+		);
+
+		expect(response.status).toBe(429);
+		expect(response.headers.get("Retry-After")).toBe("6");
+		expect(transaction).not.toHaveBeenCalled();
+		expect(insert).not.toHaveBeenCalled();
+	});
+
+	it("does not consult the limiter for unauthenticated requests", async () => {
+		getSession.mockResolvedValue(null);
+
+		const response = await POST(
+			new Request("http://localhost/api/projects", {
+				method: "POST",
+				body: JSON.stringify({ name: "Website" }),
+			}),
+		);
+
+		expect(response.status).toBe(401);
+		expect(checkRateLimit).not.toHaveBeenCalled();
 	});
 });

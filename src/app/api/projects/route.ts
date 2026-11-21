@@ -4,6 +4,11 @@ import { getSession } from "@/lib/auth/session";
 import { getProjectsForUser } from "@/lib/data/projects";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema/app";
+import {
+	checkRateLimit,
+	rateLimitResponse,
+	WRITE_POLICY,
+} from "@/lib/rate-limit";
 
 export async function GET() {
 	const session = await getSession();
@@ -22,6 +27,12 @@ export async function POST(request: Request) {
 
 	if (!session) {
 		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+	}
+
+	const rateLimit = await checkRateLimit(WRITE_POLICY, session.user.id);
+
+	if (!rateLimit.allowed) {
+		return rateLimitResponse(rateLimit.retryAfterSeconds);
 	}
 
 	let body: unknown;

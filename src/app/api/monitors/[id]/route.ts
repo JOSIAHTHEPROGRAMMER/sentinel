@@ -3,6 +3,11 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { monitors, projects } from "@/lib/db/schema/app";
+import {
+	checkRateLimit,
+	rateLimitResponse,
+	WRITE_POLICY,
+} from "@/lib/rate-limit";
 import { validateMonitorUrl } from "@/lib/validation/monitor-url";
 
 type RouteContext = {
@@ -61,6 +66,12 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
 	if (!session) {
 		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+	}
+
+	const rateLimit = await checkRateLimit(WRITE_POLICY, session.user.id);
+
+	if (!rateLimit.allowed) {
+		return rateLimitResponse(rateLimit.retryAfterSeconds);
 	}
 
 	const { id } = await params;
@@ -252,6 +263,12 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
 
 	if (!session) {
 		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+	}
+
+	const rateLimit = await checkRateLimit(WRITE_POLICY, session.user.id);
+
+	if (!rateLimit.allowed) {
+		return rateLimitResponse(rateLimit.retryAfterSeconds);
 	}
 
 	const { id } = await params;
