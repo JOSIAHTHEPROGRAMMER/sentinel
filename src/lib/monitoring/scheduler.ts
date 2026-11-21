@@ -8,15 +8,18 @@ type SchedulerOptions = {
 	runCheck: (monitorId: string) => Promise<void>;
 	now?: () => number;
 	onError?: (message: string, error: unknown) => void;
+	checkTimeoutMs?: number;
 };
 
 const MIN_INTERVAL_SECONDS = 1;
+const DEFAULT_CHECK_TIMEOUT_MS = 60_000;
 
 export function createMonitorScheduler({
 	getEligibleMonitors,
 	runCheck,
 	now = Date.now,
 	onError = (message, error) => console.error(message, error),
+	checkTimeoutMs = DEFAULT_CHECK_TIMEOUT_MS,
 }: SchedulerOptions) {
 	const nextRunAt = new Map<string, number>();
 	const activeChecks = new Map<string, Promise<void>>();
@@ -26,12 +29,22 @@ export function createMonitorScheduler({
 	let pollPromise: Promise<void> | undefined;
 
 	async function executeCheck(monitorId: string): Promise<void> {
+		let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
 		try {
-			await runCheck(monitorId);
+			await Promise.race([
+				runCheck(monitorId),
+				new Promise<never>((_, reject) => {
+					timeoutHandle = setTimeout(
+						() => reject(new Error(`Check exceeded ${checkTimeoutMs}ms`)),
+						checkTimeoutMs,
+					);
+				}),
+			]);
 		} catch (error) {
 			onError(`Monitor check failed for ${monitorId}:`, error);
 		} finally {
-			activeChecks.delete(monitorId);
+			clearTimeout(timeoutHandle);
 		}
 	}
 
@@ -78,7 +91,9 @@ export function createMonitorScheduler({
 
 				nextRunAt.set(monitor.id, currentTime + intervalSeconds * 1_000);
 
-				const checkPromise = executeCheck(monitor.id);
+				const checkPromise = executeCheck(monitor.id).finally(() => {
+					activeChecks.delete(monitor.id);
+				});
 				activeChecks.set(monitor.id, checkPromise);
 			}
 		} catch (error) {

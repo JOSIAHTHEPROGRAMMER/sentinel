@@ -204,4 +204,58 @@ describe("monitor scheduler", () => {
 
 		expect(runCheck).toHaveBeenCalledOnce();
 	});
+	it("frees a monitor whose check exceeds the time limit", async () => {
+		vi.useFakeTimers();
+
+		try {
+			runCheck.mockReturnValueOnce(new Promise<void>(() => {}));
+
+			const scheduler = createMonitorScheduler({
+				getEligibleMonitors,
+				runCheck,
+				now: () => now,
+				onError,
+				checkTimeoutMs: 1_000,
+			});
+
+			await scheduler.poll();
+			await vi.advanceTimersByTimeAsync(1_000);
+			await scheduler.waitForIdle();
+
+			expect(onError).toHaveBeenCalledWith(
+				"Monitor check failed for monitor-1:",
+				expect.any(Error),
+			);
+
+			now += 60_000;
+			await scheduler.poll();
+			await scheduler.waitForIdle();
+
+			expect(runCheck).toHaveBeenCalledTimes(2);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("recovers when a check throws synchronously", async () => {
+		runCheck.mockImplementationOnce(() => {
+			throw new Error("Unexpected failure");
+		});
+
+		const scheduler = createScheduler();
+
+		await scheduler.poll();
+		await scheduler.waitForIdle();
+
+		expect(onError).toHaveBeenCalledWith(
+			"Monitor check failed for monitor-1:",
+			expect.any(Error),
+		);
+
+		now += 60_000;
+		await scheduler.poll();
+		await scheduler.waitForIdle();
+
+		expect(runCheck).toHaveBeenCalledTimes(2);
+	});
 });

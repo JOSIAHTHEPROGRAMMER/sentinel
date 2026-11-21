@@ -9,6 +9,8 @@ import {
 	type AnalyticsRange,
 	type AnalyticsSummary,
 } from "@/lib/data/analytics-shared";
+import { isMonitorStale } from "@/lib/data/staleness";
+import { formatDurationMs } from "@/lib/format-duration";
 
 type Monitor = {
 	id: string;
@@ -24,6 +26,8 @@ type Monitor = {
 type DashboardClientProps = {
 	monitors: Monitor[];
 	analytics: AnalyticsSummary;
+	lastChecks: Record<string, string>;
+	now: number;
 };
 
 const RANGE_LABELS: Record<AnalyticsRange, string> = {
@@ -67,6 +71,8 @@ function SummaryCard({
 export default function DashboardClient({
 	monitors,
 	analytics,
+	lastChecks,
+	now,
 }: DashboardClientProps) {
 	const router = useRouter();
 	const [isPending, startTransition] = useTransition();
@@ -101,6 +107,12 @@ export default function DashboardClient({
 			: null;
 
 	const hasChecks = analytics.totalChecks > 0;
+	const staleMonitors = monitors.filter((monitor) =>
+		isMonitorStale(
+			{ ...monitor, lastCheckedAt: lastChecks[monitor.id] ?? null },
+			now,
+		),
+	);
 
 	return (
 		<div className="space-y-8">
@@ -125,6 +137,23 @@ export default function DashboardClient({
 					{isPending ? "Refreshing..." : "Refresh data"}
 				</button>
 			</section>
+
+			{staleMonitors.length > 0 && (
+				<section
+					role="alert"
+					className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4"
+				>
+					<p className="font-medium text-amber-300">
+						{staleMonitors.length}{" "}
+						{staleMonitors.length === 1 ? "monitor has" : "monitors have"} not
+						reported a check recently
+					</p>
+					<p className="mt-1 text-sm text-slate-400">
+						{staleMonitors.map((monitor) => monitor.name).join(", ")}. If this
+						persists, check that the monitoring worker is running.
+					</p>
+				</section>
+			)}
 
 			<section
 				aria-label="Performance"
@@ -270,6 +299,9 @@ export default function DashboardClient({
 										Created
 									</th>
 									<th scope="col" className="px-6 py-4 font-medium">
+										Last check
+									</th>
+									<th scope="col" className="px-6 py-4 font-medium">
 										Configuration
 									</th>
 								</tr>
@@ -298,6 +330,11 @@ export default function DashboardClient({
 										</td>
 										<td className="whitespace-nowrap px-6 py-4 text-slate-400">
 											<LocalDate value={monitor.createdAt} />
+										</td>
+										<td className="whitespace-nowrap px-6 py-4 text-slate-400">
+											{lastChecks[monitor.id]
+												? `${formatDurationMs(now - new Date(lastChecks[monitor.id]).getTime())} ago`
+												: "Never"}
 										</td>
 										<td className="px-6 py-4">
 											<span

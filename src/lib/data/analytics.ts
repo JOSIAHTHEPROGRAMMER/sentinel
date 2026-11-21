@@ -63,3 +63,27 @@ export async function getAnalyticsSummary(
 		};
 	});
 }
+
+export async function getLastCheckTimes(
+	userId: string,
+): Promise<Record<string, string>> {
+	return db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+
+		const rows = await tx
+			.select({
+				monitorId: checkResults.monitorId,
+				lastCheckedAt: sql<Date>`max(${checkResults.checkedAt})`.mapWith(
+					checkResults.checkedAt,
+				),
+			})
+			.from(checkResults)
+			.innerJoin(monitors, eq(monitors.id, checkResults.monitorId))
+			.where(isNull(monitors.deletedAt))
+			.groupBy(checkResults.monitorId);
+
+		return Object.fromEntries(
+			rows.map((row) => [row.monitorId, row.lastCheckedAt.toISOString()]),
+		);
+	});
+}

@@ -1,14 +1,20 @@
 //import "server-only";
 
 import { Client } from "undici";
-import { validateMonitorTarget } from "../validation/monitor-target";
+import {
+	type MonitorTargetValidation,
+	validateMonitorTarget,
+} from "../validation/monitor-target";
 
-const CONNECT_TIMEOUT_MS = 3_000;
-const HEADERS_TIMEOUT_MS = 5_000;
-const BODY_TIMEOUT_MS = 5_000;
 //const TOTAL_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const MAX_REDIRECTS = 3;
+
+const TIMEOUT_ERROR_CODES = new Set([
+	"UND_ERR_CONNECT_TIMEOUT",
+	"UND_ERR_HEADERS_TIMEOUT",
+	"UND_ERR_BODY_TIMEOUT",
+]);
 
 export type HttpCheckResult = {
 	success: boolean;
@@ -17,6 +23,45 @@ export type HttpCheckResult = {
 	finalUrl: string;
 	error?: string;
 };
+
+function describeError(error: unknown, signal: AbortSignal): string {
+	if (signal.aborted) {
+		return "Request timed out";
+	}
+
+	if (error instanceof Error) {
+		const code = "code" in error ? error.code : undefined;
+
+		if (typeof code === "string" && TIMEOUT_ERROR_CODES.has(code)) {
+			return "Request timed out";
+		}
+
+		return error.message;
+	}
+
+	return "Request failed";
+}
+
+function validateWithinDeadline(
+	value: string,
+	signal: AbortSignal,
+): Promise<MonitorTargetValidation> {
+	if (signal.aborted) {
+		return Promise.resolve({ valid: false, error: "Request timed out" });
+	}
+
+	return new Promise((resolve) => {
+		const onAbort = () => resolve({ valid: false, error: "Request timed out" });
+
+		signal.addEventListener("abort", onAbort, { once: true });
+
+		void validateMonitorTarget(value)
+			.then(resolve, () =>
+				resolve({ valid: false, error: "Unable to resolve hostname" }),
+			)
+			.finally(() => signal.removeEventListener("abort", onAbort));
+	});
+}
 
 export async function checkHttpTarget(
 	value: string,
@@ -38,7 +83,7 @@ export async function checkHttpTarget(
 	});
 
 	for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
-		const target = await validateMonitorTarget(currentUrl);
+		const target = await validateWithinDeadline(currentUrl, signal);
 
 		if (!target.valid) {
 			return failure(target.error);
@@ -47,9 +92,9 @@ export async function checkHttpTarget(
 		const url = new URL(currentUrl);
 
 		const client = new Client(url.origin, {
-			connectTimeout: CONNECT_TIMEOUT_MS,
-			headersTimeout: HEADERS_TIMEOUT_MS,
-			bodyTimeout: BODY_TIMEOUT_MS,
+			connectTimeout: timeoutMs,
+			headersTimeout: timeoutMs,
+			bodyTimeout: timeoutMs,
 			connect: {
 				lookup(hostname, options, callback) {
 					const requestedHostname = hostname
@@ -97,6 +142,8 @@ export async function checkHttpTarget(
 				signal,
 			});
 
+			response.body.on("error", () => {});
+
 			const location = response.headers.location;
 
 			if (
@@ -120,17 +167,14 @@ export async function checkHttpTarget(
 				continue;
 			}
 
+			// A large body is not a failure; stop reading once the cap is reached
 			let responseBytes = 0;
 
 			for await (const chunk of response.body) {
 				responseBytes += chunk.byteLength;
 
-				if (responseBytes > MAX_RESPONSE_BYTES) {
-					response.body.destroy();
-					return failure(
-						"Response body exceeded the size limit",
-						response.statusCode,
-					);
+				if (responseBytes >= MAX_RESPONSE_BYTES) {
+					break;
 				}
 			}
 
@@ -141,13 +185,7 @@ export async function checkHttpTarget(
 				finalUrl: currentUrl,
 			};
 		} catch (error) {
-			return failure(
-				signal.aborted
-					? "Request timed out"
-					: error instanceof Error
-						? error.message
-						: "Request failed",
-			);
+			return failure(describeError(error, signal));
 		} finally {
 			await client.destroy().catch(() => {});
 		}

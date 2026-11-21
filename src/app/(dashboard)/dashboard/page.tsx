@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getSession } from "@/lib/auth/session";
-import { getAnalyticsSummary } from "@/lib/data/analytics";
+import { getAnalyticsSummary, getLastCheckTimes } from "@/lib/data/analytics";
 import {
 	type AnalyticsRange,
 	parseAnalyticsRange,
@@ -20,12 +20,20 @@ async function DashboardContent({
 	userId: string;
 	range: AnalyticsRange;
 }) {
-	const [monitors, analytics] = await Promise.all([
+	const [monitors, analytics, lastChecks] = await Promise.all([
 		getMonitorsForUser(userId),
 		getAnalyticsSummary(userId, range),
+		getLastCheckTimes(userId),
 	]);
 
-	return <DashboardClient monitors={monitors} analytics={analytics} />;
+	return (
+		<DashboardClient
+			monitors={monitors}
+			analytics={analytics}
+			lastChecks={lastChecks}
+			now={Date.now()}
+		/>
+	);
 }
 
 function DashboardSkeleton() {
