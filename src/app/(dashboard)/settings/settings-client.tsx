@@ -9,11 +9,20 @@ import {
 	MIN_PASSWORD_LENGTH,
 	validateNewPassword,
 } from "@/lib/validation/password";
+import {
+	MAX_INTERVAL_SECONDS,
+	MAX_TIMEOUT_MS,
+	MIN_INTERVAL_SECONDS,
+	MIN_TIMEOUT_MS,
+	type UserSettings,
+	validateUserSettings,
+} from "@/lib/validation/user-settings";
 
 type SettingsClientProps = {
 	name: string;
 	email: string;
 	createdAt: string;
+	settings: UserSettings;
 };
 
 const inputClassName =
@@ -23,6 +32,7 @@ export default function SettingsClient({
 	name: initialName,
 	email,
 	createdAt,
+	settings,
 }: SettingsClientProps) {
 	const router = useRouter();
 
@@ -38,6 +48,19 @@ export default function SettingsClient({
 	const [savingPassword, setSavingPassword] = useState(false);
 	const [passwordError, setPasswordError] = useState("");
 	const [passwordNotice, setPasswordNotice] = useState("");
+
+	const [savedSettings, setSavedSettings] = useState(settings);
+	const [intervalSeconds, setIntervalSeconds] = useState(
+		String(settings.defaultIntervalSeconds),
+	);
+	const [timeoutMs, setTimeoutMs] = useState(String(settings.defaultTimeoutMs));
+	const [savingDefaults, setSavingDefaults] = useState(false);
+	const [defaultsError, setDefaultsError] = useState("");
+	const [defaultsNotice, setDefaultsNotice] = useState("");
+
+	const defaultsUnchanged =
+		Number(intervalSeconds) === savedSettings.defaultIntervalSeconds &&
+		Number(timeoutMs) === savedSettings.defaultTimeoutMs;
 
 	async function handleProfileSubmit(
 		event: React.SubmitEvent<HTMLFormElement>,
@@ -121,6 +144,56 @@ export default function SettingsClient({
 		}
 	}
 
+	async function handleDefaultsSubmit(
+		event: React.SubmitEvent<HTMLFormElement>,
+	) {
+		event.preventDefault();
+		setDefaultsError("");
+		setDefaultsNotice("");
+
+		const candidate = {
+			defaultIntervalSeconds: Number(intervalSeconds),
+			defaultTimeoutMs: Number(timeoutMs),
+		};
+
+		const validation = validateUserSettings(candidate);
+
+		if (!validation.valid) {
+			setDefaultsError(validation.error);
+			return;
+		}
+
+		setSavingDefaults(true);
+
+		try {
+			const response = await fetch("/api/settings", {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(validation.settings),
+			});
+
+			const data: { settings?: UserSettings; error?: string } =
+				await response.json();
+
+			if (!response.ok || !data.settings) {
+				throw new Error(data.error ?? "Unable to save your defaults.");
+			}
+
+			setSavedSettings(data.settings);
+			setIntervalSeconds(String(data.settings.defaultIntervalSeconds));
+			setTimeoutMs(String(data.settings.defaultTimeoutMs));
+			setDefaultsNotice("Your monitoring defaults have been saved.");
+		} catch (cause) {
+			setDefaultsError(
+				cause instanceof Error
+					? cause.message
+					: "Something went wrong. Please try again.",
+			);
+		} finally {
+			setSavingDefaults(false);
+		}
+	}
+
 	return (
 		<div className="mx-auto max-w-3xl space-y-8">
 			<div>
@@ -129,7 +202,7 @@ export default function SettingsClient({
 					Settings
 				</h1>
 				<p className="mt-3 text-sm leading-6 text-slate-400">
-					Manage your profile and keep your account secure.
+					Manage your profile, monitoring defaults and account security.
 				</p>
 			</div>
 
@@ -209,6 +282,97 @@ export default function SettingsClient({
 						className="cursor-pointer rounded-lg bg-cyan-400 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
 					>
 						{savingProfile ? "Saving..." : "Save name"}
+					</button>
+				</div>
+			</form>
+
+			<form
+				onSubmit={handleDefaultsSubmit}
+				className="space-y-6 rounded-2xl border border-white/10 bg-slate-900/50 p-5 sm:p-8"
+			>
+				<div>
+					<h2 className="text-lg font-semibold text-white">
+						Monitoring defaults
+					</h2>
+					<p className="mt-1 text-sm text-slate-400">
+						New monitors start with these values. Existing monitors keep their
+						own settings.
+					</p>
+				</div>
+
+				<div className="grid gap-5 sm:grid-cols-2">
+					<div className="space-y-2">
+						<label
+							htmlFor="default-interval"
+							className="block text-sm font-medium text-slate-200"
+						>
+							Check interval (seconds)
+						</label>
+						<input
+							id="default-interval"
+							type="number"
+							required
+							min={MIN_INTERVAL_SECONDS}
+							max={MAX_INTERVAL_SECONDS}
+							step={1}
+							value={intervalSeconds}
+							onChange={(event) => setIntervalSeconds(event.target.value)}
+							className={inputClassName}
+						/>
+						<p className="text-xs text-slate-500">
+							{MIN_INTERVAL_SECONDS} to {MAX_INTERVAL_SECONDS} seconds
+						</p>
+					</div>
+
+					<div className="space-y-2">
+						<label
+							htmlFor="default-timeout"
+							className="block text-sm font-medium text-slate-200"
+						>
+							Request timeout (milliseconds)
+						</label>
+						<input
+							id="default-timeout"
+							type="number"
+							required
+							min={MIN_TIMEOUT_MS}
+							max={MAX_TIMEOUT_MS}
+							step={1}
+							value={timeoutMs}
+							onChange={(event) => setTimeoutMs(event.target.value)}
+							className={inputClassName}
+						/>
+						<p className="text-xs text-slate-500">
+							{MIN_TIMEOUT_MS} to {MAX_TIMEOUT_MS} milliseconds
+						</p>
+					</div>
+				</div>
+
+				{defaultsError && (
+					<p
+						role="alert"
+						className="rounded-lg border border-red-400/20 bg-red-400/5 p-3 text-sm text-red-200"
+					>
+						{defaultsError}
+					</p>
+				)}
+
+				{defaultsNotice && (
+					<p
+						role="status"
+						className="rounded-lg border border-emerald-400/20 bg-emerald-400/5 p-3 text-sm text-emerald-200"
+					>
+						{defaultsNotice}
+					</p>
+				)}
+
+				<div className="flex justify-end border-t border-white/10 pt-5">
+					<button
+						type="submit"
+						disabled={savingDefaults || defaultsUnchanged}
+						className="cursor-pointer rounded-lg bg-cyan-400 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
+					>
+						{savingDefaults ? "Saving..." : "Save defaults"}
 					</button>
 				</div>
 			</form>

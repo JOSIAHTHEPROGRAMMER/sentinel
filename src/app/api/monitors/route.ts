@@ -2,13 +2,14 @@ import { eq, isNull, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { monitors, projects } from "@/lib/db/schema/app";
+import { monitors, projects, userSettings } from "@/lib/db/schema/app";
 import {
 	checkRateLimit,
 	rateLimitResponse,
 	WRITE_POLICY,
 } from "@/lib/rate-limit";
 import { validateMonitorUrl } from "@/lib/validation/monitor-url";
+import { DEFAULT_USER_SETTINGS } from "@/lib/validation/user-settings";
 
 const UUID_REGEX =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -122,6 +123,17 @@ export async function POST(request: Request) {
 			return { status: "limit" as const };
 		}
 
+		const [settingsRow] = await tx
+			.select({
+				defaultIntervalSeconds: userSettings.defaultIntervalSeconds,
+				defaultTimeoutMs: userSettings.defaultTimeoutMs,
+			})
+			.from(userSettings)
+			.where(eq(userSettings.userId, session.user.id))
+			.limit(1);
+
+		const defaults = settingsRow ?? DEFAULT_USER_SETTINGS;
+
 		if (projectId) {
 			const [project] = await tx
 				.select({ id: projects.id })
@@ -141,6 +153,8 @@ export async function POST(request: Request) {
 				projectId,
 				name,
 				url: urlResult.url,
+				intervalSeconds: defaults.defaultIntervalSeconds,
+				timeoutMs: defaults.defaultTimeoutMs,
 			})
 			.returning({
 				id: monitors.id,

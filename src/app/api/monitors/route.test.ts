@@ -75,12 +75,14 @@ function createTransaction(
 ) {
 	const insertBuilder = queryBuilder(options.insertResult ?? []);
 
-	// Each select call consumes the next result; POST selects the monitor count first
+	// Each select call consumes the next result. POST selects the monitor count,
+	// then the user's settings, then the project when one is given. The default
+	// is a count of zero and no settings row.
 	const selectQueue = [
 		...(options.selectResults ??
 			(options.selectResult !== undefined
 				? [options.selectResult]
-				: [[{ total: 0 }]])),
+				: [[{ total: 0 }], []])),
 	];
 
 	select.mockReset();
@@ -230,7 +232,7 @@ describe("POST /api/monitors", () => {
 		expect(transaction).not.toHaveBeenCalled();
 	});
 
-	it("creates a standalone monitor and returns 201", async () => {
+	it("creates a standalone monitor with the built-in defaults when no settings exist", async () => {
 		const monitor = {
 			id: "monitor-1",
 			projectId: null,
@@ -265,8 +267,45 @@ describe("POST /api/monitors", () => {
 			projectId: null,
 			name: "Website",
 			url: "https://example.com/",
+			intervalSeconds: 300,
+			timeoutMs: 10_000,
 		});
-		expect(select).toHaveBeenCalledOnce();
+		expect(select).toHaveBeenCalledTimes(2);
+	});
+
+	it("creates a monitor using the user's saved defaults", async () => {
+		const monitor = {
+			id: "monitor-1",
+			projectId: null,
+			name: "Website",
+			url: "https://example.com/",
+			enabled: true,
+			createdAt: new Date("2026-01-01T00:00:00Z"),
+		};
+
+		createTransaction({
+			insertResult: [monitor],
+			selectResults: [
+				[{ total: 0 }],
+				[{ defaultIntervalSeconds: 120, defaultTimeoutMs: 5_000 }],
+			],
+		});
+
+		const response = await POST(
+			postRequest(
+				JSON.stringify({ name: "Website", url: "https://example.com" }),
+			),
+		);
+
+		expect(response.status).toBe(201);
+		expect(values).toHaveBeenCalledWith({
+			ownerId: session.user.id,
+			projectId: null,
+			name: "Website",
+			url: "https://example.com/",
+			intervalSeconds: 120,
+			timeoutMs: 5_000,
+		});
 	});
 
 	it("creates a monitor assigned to an existing Project", async () => {
@@ -281,7 +320,7 @@ describe("POST /api/monitors", () => {
 
 		createTransaction({
 			insertResult: [monitor],
-			selectResults: [[{ total: 0 }], [{ id: projectId }]],
+			selectResults: [[{ total: 0 }], [], [{ id: projectId }]],
 		});
 
 		const response = await POST(
@@ -301,12 +340,14 @@ describe("POST /api/monitors", () => {
 				createdAt: monitor.createdAt.toISOString(),
 			},
 		});
-		expect(select).toHaveBeenCalledTimes(2);
+		expect(select).toHaveBeenCalledTimes(3);
 		expect(values).toHaveBeenCalledWith({
 			ownerId: session.user.id,
 			projectId,
 			name: "API Health",
 			url: "https://example.com/api/health",
+			intervalSeconds: 300,
+			timeoutMs: 10_000,
 		});
 	});
 
@@ -327,7 +368,7 @@ describe("POST /api/monitors", () => {
 	});
 
 	it("rejects a Project that does not belong to the user", async () => {
-		createTransaction({ selectResults: [[{ total: 0 }], []] });
+		createTransaction({ selectResults: [[{ total: 0 }], [], []] });
 
 		const response = await POST(
 			postRequest(
@@ -341,7 +382,7 @@ describe("POST /api/monitors", () => {
 
 		expect(response.status).toBe(404);
 		expect(await json(response)).toEqual({ error: "Project not found" });
-		expect(select).toHaveBeenCalledTimes(2);
+		expect(select).toHaveBeenCalledTimes(3);
 		expect(insert).not.toHaveBeenCalled();
 	});
 
@@ -386,7 +427,7 @@ describe("POST /api/monitors", () => {
 
 		createTransaction({
 			insertResult: [monitor],
-			selectResults: [[{ total: 49 }]],
+			selectResults: [[{ total: 49 }], []],
 		});
 
 		const response = await POST(
