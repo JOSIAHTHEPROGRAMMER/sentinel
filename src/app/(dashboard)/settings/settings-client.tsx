@@ -23,6 +23,7 @@ type SettingsClientProps = {
 	email: string;
 	createdAt: string;
 	settings: UserSettings;
+	pendingPurgeAfter: string | null;
 };
 
 const inputClassName =
@@ -33,6 +34,7 @@ export default function SettingsClient({
 	email,
 	createdAt,
 	settings,
+	pendingPurgeAfter,
 }: SettingsClientProps) {
 	const router = useRouter();
 
@@ -57,6 +59,15 @@ export default function SettingsClient({
 	const [savingDefaults, setSavingDefaults] = useState(false);
 	const [defaultsError, setDefaultsError] = useState("");
 	const [defaultsNotice, setDefaultsNotice] = useState("");
+
+	const [deletePassword, setDeletePassword] = useState("");
+	const [deleteEmail, setDeleteEmail] = useState("");
+	const [requestingDeletion, setRequestingDeletion] = useState(false);
+	const [deletionError, setDeletionError] = useState("");
+
+	const deletionReady =
+		deletePassword.length > 0 &&
+		deleteEmail.trim().toLowerCase() === email.trim().toLowerCase();
 
 	const defaultsUnchanged =
 		Number(intervalSeconds) === savedSettings.defaultIntervalSeconds &&
@@ -191,6 +202,47 @@ export default function SettingsClient({
 			);
 		} finally {
 			setSavingDefaults(false);
+		}
+	}
+
+	async function handleDeletionSubmit(
+		event: React.SubmitEvent<HTMLFormElement>,
+	) {
+		event.preventDefault();
+		setDeletionError("");
+		setRequestingDeletion(true);
+
+		try {
+			const response = await fetch("/api/account/deletion", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					password: deletePassword,
+					email: deleteEmail,
+				}),
+			});
+
+			const data: { error?: string } = await response.json();
+
+			if (!response.ok) {
+				throw new Error(data.error ?? "Unable to schedule the deletion.");
+			}
+
+			// The server already revoked every session; this clears the local cookie too
+			try {
+				await authClient.signOut();
+			} catch {
+				// Nothing to clean up if the session is already gone
+			}
+
+			window.location.assign("/sign-in?account=deletion-scheduled");
+		} catch (cause) {
+			setDeletionError(
+				cause instanceof Error
+					? cause.message
+					: "Something went wrong. Please try again.",
+			);
+			setRequestingDeletion(false);
 		}
 	}
 
@@ -475,6 +527,86 @@ export default function SettingsClient({
 					</button>
 				</div>
 			</form>
+
+			<section className="space-y-6 rounded-2xl border border-red-400/20 bg-red-400/3 p-5 sm:p-8">
+				<div>
+					<h2 className="text-lg font-semibold text-red-200">Delete account</h2>
+					<p className="mt-1 text-sm leading-6 text-slate-400">
+						Deleting your account permanently removes your monitors, projects,
+						check history, incidents and settings. You'll have a grace period to
+						change your mind before anything is removed.
+					</p>
+				</div>
+
+				{pendingPurgeAfter ? (
+					<p
+						role="status"
+						className="rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-sm text-amber-200"
+					>
+						Your account is scheduled for deletion on{" "}
+						<LocalDate value={pendingPurgeAfter} />. Use the Cancel deletion
+						button at the top of the page to keep it.
+					</p>
+				) : (
+					<form onSubmit={handleDeletionSubmit} className="space-y-5">
+						<div className="space-y-2">
+							<label
+								htmlFor="delete-password"
+								className="block text-sm font-medium text-slate-200"
+							>
+								Your password
+							</label>
+							<input
+								id="delete-password"
+								type="password"
+								required
+								autoComplete="current-password"
+								value={deletePassword}
+								onChange={(event) => setDeletePassword(event.target.value)}
+								className={inputClassName}
+							/>
+						</div>
+
+						<div className="space-y-2">
+							<label
+								htmlFor="delete-email"
+								className="block text-sm font-medium text-slate-200"
+							>
+								Type your email address to confirm
+							</label>
+							<input
+								id="delete-email"
+								type="email"
+								required
+								autoComplete="off"
+								placeholder={email}
+								value={deleteEmail}
+								onChange={(event) => setDeleteEmail(event.target.value)}
+								className={inputClassName}
+							/>
+						</div>
+
+						{deletionError && (
+							<p
+								role="alert"
+								className="rounded-lg border border-red-400/20 bg-red-400/5 p-3 text-sm text-red-200"
+							>
+								{deletionError}
+							</p>
+						)}
+
+						<div className="flex justify-end border-t border-red-400/20 pt-5">
+							<button
+								type="submit"
+								disabled={requestingDeletion || !deletionReady}
+								className="cursor-pointer rounded-lg border border-red-400/30 px-5 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-50"
+							>
+								{requestingDeletion ? "Scheduling..." : "Delete my account"}
+							</button>
+						</div>
+					</form>
+				)}
+			</section>
 		</div>
 	);
 }

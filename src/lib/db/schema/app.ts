@@ -188,3 +188,28 @@ export const userSettings = appSchema.table(
 		}),
 	],
 );
+export const accountDeletions = appSchema.table(
+	"account_deletions",
+	{
+		userId: text("user_id")
+			.primaryKey()
+			.references(() => user.id, { onDelete: "cascade" }),
+		requestedAt: timestamp("requested_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		purgeAfter: timestamp("purge_after", { withTimezone: true }).notNull(),
+	},
+	(table) => [
+		index("account_deletions_purge_after_idx").on(table.purgeAfter),
+		check(
+			"account_deletions_purge_after_range",
+			sql`${table.purgeAfter} >= ${table.requestedAt}`,
+		),
+		pgPolicy("account_deletions_owner_access", {
+			for: "all",
+			to: "sentinel_app",
+			using: sql`user_id = current_setting('app.user_id', true)`,
+			withCheck: sql`user_id = current_setting('app.user_id', true)`,
+		}),
+	],
+);

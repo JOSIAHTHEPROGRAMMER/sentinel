@@ -1,6 +1,7 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { monitors } from "@/lib/db/schema/app";
 import { closeWorkerDb, workerDb } from "@/lib/db/worker";
+import { createAccountPurger } from "@/lib/monitoring/purge-accounts";
 import { runMonitorCheck } from "@/lib/monitoring/run-monitor-check";
 import { createMonitorScheduler } from "@/lib/monitoring/scheduler";
 
@@ -73,6 +74,24 @@ const scheduler = createMonitorScheduler({
 	},
 });
 
+const purger = createAccountPurger({
+	purge: async () => {
+		const result = await workerDb.execute(
+			sql`SELECT app.purge_due_account_deletions() AS purged`,
+		);
+
+		const [row] = result.rows as Array<{ purged: number | string }>;
+
+		return Number(row?.purged ?? 0);
+	},
+	onPurged: (count) => {
+		log("info", "accounts.purged", { count });
+	},
+	onError: (error) => {
+		log("error", "accounts.purge_failed", describeError(error));
+	},
+});
+
 async function shutdown(): Promise<void> {
 	if (stopping) {
 		return;
@@ -91,6 +110,7 @@ async function shutdown(): Promise<void> {
 	log("info", "worker.stopping");
 
 	await scheduler.waitForIdle();
+	await purger.waitForIdle();
 	await closeWorkerDb();
 
 	log("info", "worker.stopped");
@@ -124,8 +144,11 @@ async function main(): Promise<void> {
 	await scheduler.poll();
 
 	if (!stopping) {
+		void purger.run();
+
 		timer = setInterval(() => {
 			void scheduler.poll();
+			void purger.run();
 		}, POLL_INTERVAL_MS);
 	}
 }

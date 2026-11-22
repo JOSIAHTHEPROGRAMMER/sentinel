@@ -17,12 +17,14 @@ type DashboardShellProps = {
 	children: React.ReactNode;
 	userName: string;
 	userEmail: string;
+	banner?: React.ReactNode;
 };
 
 export function DashboardShell({
 	children,
 	userName,
 	userEmail,
+	banner,
 }: DashboardShellProps) {
 	const pathname = usePathname();
 	const router = useRouter();
@@ -140,7 +142,7 @@ export function DashboardShell({
 						</button>
 					</div>
 				</header>
-
+				{banner}
 				{error && (
 					<p
 						role="alert"

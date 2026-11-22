@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { DeletionScheduledNotice } from "@/components/auth/deletion-scheduled-notice";
 import { authClient } from "@/lib/auth/client";
 
 export default function SignInPage() {
@@ -54,6 +55,9 @@ export default function SignInPage() {
 					<p className="mt-2 text-sm text-slate-400">
 						Sign in to manage your API monitors.
 					</p>
+					<Suspense>
+						<DeletionScheduledNotice />
+					</Suspense>
 
 					<form className="mt-8 space-y-5" onSubmit={handleSubmit}>
 						<div>
