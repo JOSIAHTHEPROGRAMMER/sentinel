@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
 	boolean,
+	check,
 	foreignKey,
 	index,
 	integer,
@@ -149,6 +150,41 @@ export const incidents = appSchema.table(
 			for: "select",
 			to: "sentinel_app",
 			using: sql`EXISTS(SELECT 1 FROM app.monitors AS m WHERE m.id = monitor_id AND m.owner_id = current_setting('app.user_id', true))`,
+		}),
+	],
+);
+
+export const userSettings = appSchema.table(
+	"user_settings",
+	{
+		userId: text("user_id")
+			.primaryKey()
+			.references(() => user.id, { onDelete: "cascade" }),
+		defaultIntervalSeconds: integer("default_interval_seconds")
+			.default(300)
+			.notNull(),
+		defaultTimeoutMs: integer("default_timeout_ms").default(10000).notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		check(
+			"user_settings_interval_range",
+			sql`${table.defaultIntervalSeconds} BETWEEN 60 AND 86400`,
+		),
+		check(
+			"user_settings_timeout_range",
+			sql`${table.defaultTimeoutMs} BETWEEN 1000 AND 30000`,
+		),
+		pgPolicy("user_settings_owner_access", {
+			for: "all",
+			to: "sentinel_app",
+			using: sql`user_id = current_setting('app.user_id', true)`,
+			withCheck: sql`user_id = current_setting('app.user_id', true)`,
 		}),
 	],
 );

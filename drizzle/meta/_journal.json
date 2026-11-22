@@ -43,6 +43,13 @@
       "when": 1795271361514,
       "tag": "0005_worker_role_and_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795352683456,
+      "tag": "0006_user_settings",
+      "breakpoints": true
     }
   ]
 }
