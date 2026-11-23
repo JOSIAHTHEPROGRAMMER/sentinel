@@ -2,18 +2,35 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getSession } from "@/lib/auth/session";
 import { getMonitorsForUser } from "@/lib/data/monitors";
+import { getProjectsForUser } from "@/lib/data/projects";
 import MonitorsClient from "./monitors-client";
 
-async function MonitorsContent() {
-	const session = await getSession();
+type MonitorsPageProps = {
+	searchParams: Promise<{ project?: string | string[] }>;
+};
 
-	if (!session) {
-		redirect("/sign-in");
-	}
+async function MonitorsContent({
+	userId,
+	projectFilter,
+}: {
+	userId: string;
+	projectFilter: string | undefined;
+}) {
+	const [monitors, projects] = await Promise.all([
+		getMonitorsForUser(userId),
+		getProjectsForUser(userId),
+	]);
 
-	const monitors = await getMonitorsForUser(session.user.id);
-
-	return <MonitorsClient initialMonitors={monitors} />;
+	return (
+		<MonitorsClient
+			monitors={monitors}
+			projects={projects.map((project) => ({
+				id: project.id,
+				name: project.name,
+			}))}
+			projectFilter={projectFilter}
+		/>
+	);
 }
 
 function MonitorsSkeleton() {
@@ -29,10 +46,21 @@ function MonitorsSkeleton() {
 	);
 }
 
-export default function MonitorsPage() {
+export default async function MonitorsPage({
+	searchParams,
+}: MonitorsPageProps) {
+	const [session, params] = await Promise.all([getSession(), searchParams]);
+
+	if (!session) {
+		redirect("/sign-in");
+	}
+
+	const projectFilter =
+		typeof params.project === "string" ? params.project : undefined;
+
 	return (
 		<Suspense fallback={<MonitorsSkeleton />}>
-			<MonitorsContent />
+			<MonitorsContent userId={session.user.id} projectFilter={projectFilter} />
 		</Suspense>
 	);
 }

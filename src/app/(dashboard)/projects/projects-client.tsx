@@ -10,6 +10,9 @@ type Project = {
 	createdAt: string;
 	updatedAt: string;
 	monitorCount: number;
+	enabledCount: number;
+	disabledCount: number;
+	openIncidents: number;
 	health: {
 		totalChecks: number;
 		successfulChecks: number;
@@ -142,11 +145,20 @@ export default function ProjectsClient({ projects }: ProjectsClientProps) {
 						>
 							<div className="flex items-start justify-between gap-3">
 								<h2 className="font-medium text-white">{project.name}</h2>
-								<span className="text-xs text-slate-500">
-									{project.monitorCount}{" "}
-									{project.monitorCount === 1 ? "monitor" : "monitors"}
-								</span>
+								{project.openIncidents > 0 && (
+									<span className="shrink-0 rounded-full bg-red-400/10 px-2.5 py-1 text-xs font-medium text-red-300">
+										{project.openIncidents} open{" "}
+										{project.openIncidents === 1 ? "incident" : "incidents"}
+									</span>
+								)}
 							</div>
+
+							<p className="mt-2 text-xs text-slate-500">
+								{project.monitorCount}{" "}
+								{project.monitorCount === 1 ? "monitor" : "monitors"}
+								{project.monitorCount > 0 &&
+									` (${project.enabledCount} enabled, ${project.disabledCount} disabled)`}
+							</p>
 
 							<div className="mt-6 grid grid-cols-2 gap-4">
 								<div>

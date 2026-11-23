@@ -33,6 +33,7 @@ export default async function ProjectDetailsPage({ params }: PageProps) {
 		<ProjectDetailsClient
 			project={result.project}
 			monitors={result.monitors}
+			counts={result.counts}
 			health={result.health}
 		/>
 	);

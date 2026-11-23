@@ -17,6 +17,8 @@ type RouteContext = {
 const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+const MAX_BODY_BYTES = 2 * 1024;
+
 export async function GET(_request: Request, { params }: RouteContext) {
 	const session = await getSession();
 
@@ -46,22 +48,40 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 	}
 
-	const { id } = await params;
-
 	const rateLimit = await checkRateLimit(WRITE_POLICY, session.user.id);
 
 	if (!rateLimit.allowed) {
 		return rateLimitResponse(rateLimit.retryAfterSeconds);
 	}
 
+	const { id } = await params;
+
 	if (!UUID_PATTERN.test(id)) {
 		return NextResponse.json({ error: "Invalid project ID" }, { status: 400 });
+	}
+
+	const declaredLength = Number(request.headers.get("content-length"));
+
+	if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+		return NextResponse.json(
+			{ error: "Request body too large" },
+			{ status: 413 },
+		);
 	}
 
 	let body: unknown;
 
 	try {
-		body = await request.json();
+		const raw = await request.text();
+
+		if (raw.length > MAX_BODY_BYTES) {
+			return NextResponse.json(
+				{ error: "Request body too large" },
+				{ status: 413 },
+			);
+		}
+
+		body = JSON.parse(raw);
 	} catch {
 		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
@@ -131,13 +151,13 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
 		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 	}
 
-	const { id } = await params;
-
 	const rateLimit = await checkRateLimit(WRITE_POLICY, session.user.id);
 
 	if (!rateLimit.allowed) {
 		return rateLimitResponse(rateLimit.retryAfterSeconds);
 	}
+
+	const { id } = await params;
 
 	if (!UUID_PATTERN.test(id)) {
 		return NextResponse.json({ error: "Invalid project ID" }, { status: 400 });

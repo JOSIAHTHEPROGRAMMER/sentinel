@@ -18,6 +18,7 @@ const {
 	checkRateLimit: vi.fn(),
 }));
 
+vi.mock("server-only", () => ({}));
 vi.mock("@/lib/auth/session", () => ({ getSession }));
 vi.mock("@/lib/db", () => ({ db: { transaction } }));
 vi.mock("@/lib/rate-limit", async (importOriginal) => ({
@@ -40,7 +41,7 @@ const project = {
 	updatedAt: new Date("2026-01-01T00:00:00Z"),
 };
 
-const monitor = {
+const monitorRow = {
 	id: "32bc70f6-c55f-4034-8bd7-f45bc84abab0",
 	name: "Website",
 	url: "https://example.com/",
@@ -49,6 +50,20 @@ const monitor = {
 	timeoutMs: 10000,
 	createdAt: new Date("2026-01-02T00:00:00Z"),
 	updatedAt: new Date("2026-01-02T00:00:00Z"),
+	openIncidentStartedAt: null,
+	openIncidentReason: null,
+};
+
+const expectedMonitor = {
+	id: monitorRow.id,
+	name: "Website",
+	url: "https://example.com/",
+	enabled: true,
+	intervalSeconds: 300,
+	timeoutMs: 10000,
+	createdAt: "2026-01-02T00:00:00.000Z",
+	updatedAt: "2026-01-02T00:00:00.000Z",
+	openIncident: null,
 };
 
 const emptyHealth = {
@@ -58,12 +73,19 @@ const emptyHealth = {
 	averageResponseTime: null,
 };
 
+const expectedProject = {
+	...project,
+	createdAt: project.createdAt.toISOString(),
+	updatedAt: project.updatedAt.toISOString(),
+};
+
 function queryBuilder(result: unknown) {
 	const promise = Promise.resolve(result);
 
 	const methods = {
 		from: vi.fn(),
 		innerJoin: vi.fn(),
+		leftJoin: vi.fn(),
 		where: vi.fn(),
 		orderBy: vi.fn(),
 		limit: vi.fn(),
@@ -83,6 +105,7 @@ function queryBuilder(result: unknown) {
 	for (const method of [
 		methods.from,
 		methods.innerJoin,
+		methods.leftJoin,
 		methods.where,
 		methods.orderBy,
 		methods.limit,
@@ -142,10 +165,14 @@ function createTransaction(
 	transaction.mockImplementation(async (callback) => callback(tx));
 }
 
-function makeRequest(body: string, method: string) {
+function makeRequest(
+	body: string,
+	method: string,
+	headers: Record<string, string> = {},
+) {
 	return new Request(`http://localhost/api/projects/${projectId}`, {
 		method,
-		headers: { "Content-Type": "application/json" },
+		headers: { "Content-Type": "application/json", ...headers },
 		body,
 	});
 }
@@ -184,28 +211,19 @@ describe("GET /api/projects/[id]", () => {
 		expect(transaction).not.toHaveBeenCalled();
 	});
 
-	it("returns the project and its monitors", async () => {
+	it("returns the project, its monitors and counts", async () => {
 		createTransaction({
 			projectResult: [project],
-			monitorsResult: [monitor],
+			monitorsResult: [monitorRow],
 		});
 
 		const response = await GET(new Request("http://localhost"), context);
 
 		expect(response.status).toBe(200);
 		expect(await json(response)).toEqual({
-			project: {
-				...project,
-				createdAt: project.createdAt.toISOString(),
-				updatedAt: project.updatedAt.toISOString(),
-			},
-			monitors: [
-				{
-					...monitor,
-					createdAt: monitor.createdAt.toISOString(),
-					updatedAt: monitor.updatedAt.toISOString(),
-				},
-			],
+			project: expectedProject,
+			monitors: [expectedMonitor],
+			counts: { monitors: 1, enabled: 1, disabled: 0, openIncidents: 0 },
 			health: emptyHealth,
 		});
 
@@ -223,13 +241,82 @@ describe("GET /api/projects/[id]", () => {
 
 		expect(response.status).toBe(200);
 		expect(await json(response)).toEqual({
-			project: {
-				...project,
-				createdAt: project.createdAt.toISOString(),
-				updatedAt: project.updatedAt.toISOString(),
-			},
+			project: expectedProject,
 			monitors: [],
+			counts: { monitors: 0, enabled: 0, disabled: 0, openIncidents: 0 },
 			health: emptyHealth,
+		});
+	});
+
+	it("flags monitors with an open incident and lists them first", async () => {
+		const unhealthy = {
+			...monitorRow,
+			id: "11111111-1111-4111-8111-111111111111",
+			name: "Payments",
+			createdAt: new Date("2026-01-03T00:00:00Z"),
+			openIncidentStartedAt: new Date("2026-01-05T00:00:00Z"),
+			openIncidentReason: "HTTP 503",
+		};
+
+		createTransaction({
+			projectResult: [project],
+			monitorsResult: [monitorRow, unhealthy],
+		});
+
+		const response = await GET(new Request("http://localhost"), context);
+		const body = await json(response);
+
+		expect(
+			body.monitors.map((monitor: { name: string }) => monitor.name),
+		).toEqual(["Payments", "Website"]);
+		expect(body.monitors[0].openIncident).toEqual({
+			startedAt: "2026-01-05T00:00:00.000Z",
+			reason: "HTTP 503",
+		});
+		expect(body.monitors[1].openIncident).toBeNull();
+		expect(body.counts.openIncidents).toBe(1);
+	});
+
+	it("counts enabled and disabled monitors", async () => {
+		createTransaction({
+			projectResult: [project],
+			monitorsResult: [
+				monitorRow,
+				{
+					...monitorRow,
+					id: "22222222-2222-4222-8222-222222222222",
+					enabled: false,
+				},
+			],
+		});
+
+		const response = await GET(new Request("http://localhost"), context);
+		const body = await json(response);
+
+		expect(body.counts).toEqual({
+			monitors: 2,
+			enabled: 1,
+			disabled: 1,
+			openIncidents: 0,
+		});
+	});
+
+	it("computes floored uptime from successful checks", async () => {
+		createTransaction({
+			projectResult: [project],
+			healthResult: [
+				{ totalChecks: 3, successfulChecks: 2, averageResponseTime: 120 },
+			],
+		});
+
+		const response = await GET(new Request("http://localhost"), context);
+		const body = await json(response);
+
+		expect(body.health).toEqual({
+			totalChecks: 3,
+			successfulChecks: 2,
+			uptimePercentage: 66.66,
+			averageResponseTime: 120,
 		});
 	});
 
@@ -319,6 +406,29 @@ describe("PATCH /api/projects/[id]", () => {
 		expect(update).not.toHaveBeenCalled();
 	});
 
+	it("rejects an oversized body", async () => {
+		const response = await PATCH(
+			makeRequest(JSON.stringify({ name: "a".repeat(3_000) }), "PATCH"),
+			context,
+		);
+
+		expect(response.status).toBe(413);
+		expect(transaction).not.toHaveBeenCalled();
+		expect(update).not.toHaveBeenCalled();
+	});
+
+	it("rejects a body whose declared length is too large", async () => {
+		const response = await PATCH(
+			makeRequest(JSON.stringify({ name: "Updated" }), "PATCH", {
+				"content-length": "100000",
+			}),
+			context,
+		);
+
+		expect(response.status).toBe(413);
+		expect(transaction).not.toHaveBeenCalled();
+	});
+
 	it("updates a project and returns it", async () => {
 		const updatedProject = {
 			...project,
@@ -372,6 +482,17 @@ describe("PATCH /api/projects/[id]", () => {
 		);
 		expect(transaction).not.toHaveBeenCalled();
 		expect(update).not.toHaveBeenCalled();
+	});
+
+	it("does not consult the limiter for unauthenticated PATCH requests", async () => {
+		getSession.mockResolvedValue(null);
+
+		await PATCH(
+			makeRequest(JSON.stringify({ name: "Updated Website" }), "PATCH"),
+			context,
+		);
+
+		expect(checkRateLimit).not.toHaveBeenCalled();
 	});
 });
 

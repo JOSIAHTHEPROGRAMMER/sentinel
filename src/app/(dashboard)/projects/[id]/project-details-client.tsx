@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { LocalDate } from "@/components/ui/local-date";
 
 type Project = {
 	id: string;
@@ -16,6 +17,14 @@ type Monitor = {
 	name: string;
 	url: string;
 	enabled: boolean;
+	openIncident: { startedAt: string; reason: string } | null;
+};
+
+type ProjectCounts = {
+	monitors: number;
+	enabled: number;
+	disabled: number;
+	openIncidents: number;
 };
 
 type ProjectHealth = {
@@ -28,12 +37,14 @@ type ProjectHealth = {
 type ProjectDetailsClientProps = {
 	project: Project;
 	monitors: Monitor[];
+	counts: ProjectCounts;
 	health: ProjectHealth;
 };
 
 export default function ProjectDetailsClient({
 	project,
 	monitors,
+	counts,
 	health,
 }: ProjectDetailsClientProps) {
 	const router = useRouter();
@@ -152,15 +163,34 @@ export default function ProjectDetailsClient({
 			)}
 
 			<section
-				className={`grid gap-4 transition-opacity sm:grid-cols-2 xl:grid-cols-4 ${
+				className={`grid gap-4 transition-opacity sm:grid-cols-2 xl:grid-cols-5 ${
 					isPending ? "opacity-60" : ""
 				}`}
 			>
 				<div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-					<p className="text-sm text-slate-400">Assigned monitors</p>
+					<p className="text-sm text-slate-400">Monitors</p>
 					<p className="mt-2 text-2xl font-semibold text-white">
-						{monitors.length}
+						{counts.monitors}
 					</p>
+					<p className="mt-1 text-xs text-slate-500">
+						{counts.enabled} enabled, {counts.disabled} disabled
+					</p>
+				</div>
+				<div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+					<p className="text-sm text-slate-400">Open incidents</p>
+					<p
+						className={`mt-2 text-2xl font-semibold ${
+							counts.openIncidents > 0 ? "text-red-300" : "text-white"
+						}`}
+					>
+						{counts.openIncidents}
+					</p>
+					<Link
+						href={`/incidents?project=${project.id}&range=all`}
+						className="mt-1 inline-block text-xs text-cyan-300 hover:text-cyan-200"
+					>
+						View incident history
+					</Link>
 				</div>
 				<div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
 					<p className="text-sm text-slate-400">24h uptime</p>
@@ -188,11 +218,22 @@ export default function ProjectDetailsClient({
 			</section>
 
 			<section className="space-y-4">
-				<div>
-					<h2 className="text-lg font-semibold text-white">Monitors</h2>
-					<p className="mt-1 text-sm text-slate-400">
-						Endpoints assigned to this project.
-					</p>
+				<div className="flex flex-wrap items-end justify-between gap-3">
+					<div>
+						<h2 className="text-lg font-semibold text-white">Monitors</h2>
+						<p className="mt-1 text-sm text-slate-400">
+							Endpoints assigned to this project. Monitors with an open incident
+							are listed first.
+						</p>
+					</div>
+					{monitors.length > 0 && (
+						<Link
+							href={`/monitors?project=${project.id}`}
+							className="text-sm text-cyan-300 hover:text-cyan-200"
+						>
+							View in monitors list
+						</Link>
+					)}
 				</div>
 
 				{monitors.length === 0 ? (
@@ -214,21 +255,37 @@ export default function ProjectDetailsClient({
 							<Link
 								key={monitor.id}
 								href={`/monitors/${monitor.id}`}
-								className="flex flex-col gap-2 border-b border-slate-800 bg-slate-900/40 px-5 py-4 transition last:border-b-0 hover:bg-slate-900 sm:flex-row sm:items-center sm:justify-between"
+								className={`flex flex-col gap-2 border-b border-slate-800 px-5 py-4 transition last:border-b-0 hover:bg-slate-900 sm:flex-row sm:items-center sm:justify-between ${
+									monitor.openIncident ? "bg-red-950/20" : "bg-slate-900/40"
+								}`}
 							>
-								<div>
+								<div className="min-w-0">
 									<p className="font-medium text-white">{monitor.name}</p>
 									<p className="mt-1 break-all text-sm text-slate-400">
 										{monitor.url}
 									</p>
+									{monitor.openIncident && (
+										<p className="mt-2 wrap-break-word text-xs text-red-300">
+											Open incident since{" "}
+											<LocalDate value={monitor.openIncident.startedAt} />:{" "}
+											{monitor.openIncident.reason}
+										</p>
+									)}
 								</div>
-								<span
-									className={`text-xs ${
-										monitor.enabled ? "text-emerald-400" : "text-slate-500"
-									}`}
-								>
-									{monitor.enabled ? "Enabled" : "Disabled"}
-								</span>
+								<div className="flex shrink-0 items-center gap-3">
+									{monitor.openIncident && (
+										<span className="rounded-full bg-red-400/10 px-2.5 py-1 text-xs font-medium text-red-300">
+											Incident
+										</span>
+									)}
+									<span
+										className={`text-xs ${
+											monitor.enabled ? "text-emerald-400" : "text-slate-500"
+										}`}
+									>
+										{monitor.enabled ? "Enabled" : "Disabled"}
+									</span>
+								</div>
 							</Link>
 						))}
 					</div>

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useTransition } from "react";
 
 type Monitor = {
 	id: string;
@@ -20,19 +21,13 @@ type Project = {
 	name: string;
 };
 
-type MonitorResponse = {
-	monitors?: Monitor[];
-	error?: string;
-};
-
-type ProjectResponse = {
-	projects?: Project[];
-	error?: string;
-};
-
 type MonitorsClientProps = {
-	initialMonitors: Monitor[];
+	monitors: Monitor[];
+	projects: Project[];
+	projectFilter: string | undefined;
 };
+
+const STANDALONE = "standalone";
 
 function formatInterval(seconds: number): string {
 	if (seconds % 3600 === 0) {
@@ -48,115 +43,48 @@ function formatInterval(seconds: number): string {
 }
 
 export default function MonitorsClient({
-	initialMonitors,
+	monitors,
+	projects,
+	projectFilter,
 }: MonitorsClientProps) {
-	const [monitors, setMonitors] = useState<Monitor[]>(initialMonitors);
-	const [projects, setProjects] = useState<Project[]>([]);
-	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-	const controllerRef = useRef<AbortController | null>(null);
-
-	const [projectsLoading, setProjectsLoading] = useState(true);
-
-	const loadProjects = useCallback(async () => {
-		controllerRef.current?.abort();
-
-		const controller = new AbortController();
-		controllerRef.current = controller;
-
-		try {
-			const response = await fetch("/api/projects", {
-				cache: "no-store",
-				signal: controller.signal,
-			});
-
-			const data: ProjectResponse = await response.json();
-
-			if (!response.ok || !Array.isArray(data.projects)) {
-				throw new Error(data.error ?? "Unable to load projects.");
-			}
-
-			setProjects(data.projects);
-		} catch (cause) {
-			if (controller.signal.aborted) return;
-
-			setError(
-				cause instanceof Error ? cause.message : "Unable to load projects.",
-			);
-		} finally {
-			if (!controller.signal.aborted) {
-				setProjectsLoading(false);
-			}
-		}
-	}, []);
-
-	const loadMonitors = useCallback(async () => {
-		controllerRef.current?.abort();
-
-		const controller = new AbortController();
-		controllerRef.current = controller;
-
-		setLoading(true);
-		setError(null);
-
-		try {
-			const [monitorResponse, projectResponse] = await Promise.all([
-				fetch("/api/monitors", {
-					cache: "no-store",
-					signal: controller.signal,
-				}),
-				fetch("/api/projects", {
-					cache: "no-store",
-					signal: controller.signal,
-				}),
-			]);
-
-			const [monitorData, projectData]: [MonitorResponse, ProjectResponse] =
-				await Promise.all([monitorResponse.json(), projectResponse.json()]);
-
-			if (!monitorResponse.ok) {
-				throw new Error(
-					monitorResponse.status === 401
-						? "Your session has expired or you are not signed in."
-						: (monitorData.error ?? "Unable to load monitors."),
-				);
-			}
-
-			if (!Array.isArray(monitorData.monitors)) {
-				throw new Error("The server returned an unexpected monitor response.");
-			}
-
-			if (!projectResponse.ok || !Array.isArray(projectData.projects)) {
-				throw new Error(
-					projectData.error ?? "Unable to load Project associations.",
-				);
-			}
-
-			setMonitors(monitorData.monitors);
-			setProjects(projectData.projects);
-		} catch (cause) {
-			if (controller.signal.aborted) return;
-
-			setError(
-				cause instanceof Error ? cause.message : "Unable to load monitors.",
-			);
-		} finally {
-			if (!controller.signal.aborted) {
-				setLoading(false);
-				setProjectsLoading(false);
-			}
-		}
-	}, []);
-
-	useEffect(() => {
-		void loadProjects();
-
-		return () => controllerRef.current?.abort();
-	}, [loadProjects]);
+	const router = useRouter();
+	const [isPending, startTransition] = useTransition();
 
 	const projectNames = new Map(
 		projects.map((project) => [project.id, project.name]),
 	);
+
+	// An unknown or stale filter value (for example a deleted project) is ignored
+	const activeFilter =
+		projectFilter === STANDALONE || projectNames.has(projectFilter ?? "")
+			? projectFilter
+			: undefined;
+
+	const filtered = monitors.filter((monitor) => {
+		if (activeFilter === undefined) {
+			return true;
+		}
+
+		if (activeFilter === STANDALONE) {
+			return monitor.projectId === null;
+		}
+
+		return monitor.projectId === activeFilter;
+	});
+
+	function refresh() {
+		startTransition(() => {
+			router.refresh();
+		});
+	}
+
+	function changeFilter(value: string) {
+		startTransition(() => {
+			router.push(value === "" ? "/monitors" : `/monitors?project=${value}`, {
+				scroll: false,
+			});
+		});
+	}
 
 	return (
 		<div className="space-y-8">
@@ -174,11 +102,11 @@ export default function MonitorsClient({
 				<div className="flex gap-3">
 					<button
 						type="button"
-						onClick={() => void loadMonitors()}
-						disabled={loading}
-						className="cursor-pointer rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+						onClick={refresh}
+						disabled={isPending}
+						className="cursor-pointer rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-300 hover:bg-white/5 disabled:cursor-wait disabled:opacity-50"
 					>
-						Refresh
+						{isPending ? "Refreshing..." : "Refresh"}
 					</button>
 					<Link
 						href="/monitors/new"
@@ -189,49 +117,48 @@ export default function MonitorsClient({
 				</div>
 			</section>
 
-			{error && (
-				<section
-					role="alert"
-					className="flex flex-col gap-3 rounded-xl border border-red-400/20 bg-red-400/5 p-4 sm:flex-row sm:items-center sm:justify-between"
-				>
-					<p className="text-sm text-red-200">{error}</p>
-					<button
-						type="button"
-						onClick={() => void loadMonitors()}
-						className="cursor-pointer self-start rounded-lg border border-red-400/20 px-3 py-2 text-sm text-red-200 hover:bg-red-400/10"
-					>
-						Try again
-					</button>
-				</section>
-			)}
+			<section
+				className={`overflow-hidden rounded-2xl border border-white/10 bg-slate-900/50 transition-opacity ${
+					isPending ? "opacity-60" : ""
+				}`}
+			>
+				<div className="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 px-5 py-5 sm:px-6">
+					<div>
+						<h2 className="font-semibold text-white">All monitors</h2>
+						<p className="mt-1 text-sm text-slate-400">
+							{activeFilter === undefined
+								? `${monitors.length} configured ${monitors.length === 1 ? "endpoint" : "endpoints"}`
+								: `${filtered.length} of ${monitors.length} ${monitors.length === 1 ? "endpoint" : "endpoints"} shown`}
+						</p>
+					</div>
 
-			<section className="overflow-hidden rounded-2xl border border-white/10 bg-slate-900/50">
-				<div className="border-b border-white/10 px-5 py-5 sm:px-6">
-					<h2 className="font-semibold text-white">All monitors</h2>
-					<p className="mt-1 text-sm text-slate-400">
-						{monitors.length} configured{" "}
-						{monitors.length === 1 ? "endpoint" : "endpoints"}
-					</p>
+					{monitors.length > 0 && (
+						<div className="space-y-1">
+							<label
+								htmlFor="monitor-project-filter"
+								className="block text-xs text-slate-500"
+							>
+								Project
+							</label>
+							<select
+								id="monitor-project-filter"
+								value={activeFilter ?? ""}
+								onChange={(event) => changeFilter(event.target.value)}
+								className="max-w-56 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400"
+							>
+								<option value="">All projects</option>
+								<option value={STANDALONE}>Standalone</option>
+								{projects.map((project) => (
+									<option key={project.id} value={project.id}>
+										{project.name}
+									</option>
+								))}
+							</select>
+						</div>
+					)}
 				</div>
 
-				{loading && monitors.length === 0 ? (
-					<div
-						role="status"
-						aria-label="Loading monitors"
-						className="space-y-3 p-6"
-					>
-						{[1, 2, 3].map((item) => (
-							<div
-								key={item}
-								className="h-20 animate-pulse rounded-lg bg-white/5"
-							/>
-						))}
-					</div>
-				) : error && monitors.length === 0 ? (
-					<p className="px-6 py-12 text-center text-sm text-slate-400">
-						Monitor data is unavailable. Try refreshing the list.
-					</p>
-				) : monitors.length === 0 ? (
+				{monitors.length === 0 ? (
 					<div className="px-6 py-14 text-center">
 						<div className="mx-auto flex size-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-xl text-cyan-300">
 							◎
@@ -249,9 +176,22 @@ export default function MonitorsClient({
 							Create your first monitor
 						</Link>
 					</div>
+				) : filtered.length === 0 ? (
+					<div className="px-6 py-12 text-center">
+						<p className="font-medium text-white">
+							No monitors match this filter
+						</p>
+						<button
+							type="button"
+							onClick={() => changeFilter("")}
+							className="mt-3 cursor-pointer text-sm text-cyan-300 hover:text-cyan-200"
+						>
+							Show all projects
+						</button>
+					</div>
 				) : (
 					<div className="divide-y divide-white/5">
-						{monitors.map((monitor) => (
+						{filtered.map((monitor) => (
 							<Link
 								key={monitor.id}
 								href={`/monitors/${monitor.id}`}
@@ -284,7 +224,7 @@ export default function MonitorsClient({
 										<span className="text-cyan-300">
 											{monitor.projectId
 												? (projectNames.get(monitor.projectId) ??
-													(projectsLoading ? "Loading..." : "Unknown Project"))
+													"Unknown project")
 												: "Standalone"}
 										</span>
 									</p>

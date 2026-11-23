@@ -10,6 +10,8 @@ import {
 	WRITE_POLICY,
 } from "@/lib/rate-limit";
 
+const MAX_BODY_BYTES = 2 * 1024;
+
 export async function GET() {
 	const session = await getSession();
 
@@ -35,10 +37,28 @@ export async function POST(request: Request) {
 		return rateLimitResponse(rateLimit.retryAfterSeconds);
 	}
 
+	const declaredLength = Number(request.headers.get("content-length"));
+
+	if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+		return NextResponse.json(
+			{ error: "Request body too large" },
+			{ status: 413 },
+		);
+	}
+
 	let body: unknown;
 
 	try {
-		body = await request.json();
+		const raw = await request.text();
+
+		if (raw.length > MAX_BODY_BYTES) {
+			return NextResponse.json(
+				{ error: "Request body too large" },
+				{ status: 413 },
+			);
+		}
+
+		body = JSON.parse(raw);
 	} catch {
 		return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
@@ -52,6 +72,13 @@ export async function POST(request: Request) {
 	) {
 		return NextResponse.json(
 			{ error: "A project name is required" },
+			{ status: 400 },
+		);
+	}
+
+	if (Object.keys(body).some((key) => key !== "name")) {
+		return NextResponse.json(
+			{ error: "Only name is supported" },
 			{ status: 400 },
 		);
 	}
