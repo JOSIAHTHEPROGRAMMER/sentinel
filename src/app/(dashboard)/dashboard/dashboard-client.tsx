@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
+import { ResponseTimeChart } from "@/components/charts/response-time-chart";
 import { LocalDate } from "@/components/ui/local-date";
+import type { ChartBucket } from "@/lib/data/analytics-buckets";
 import {
 	ANALYTICS_RANGES,
 	type AnalyticsRange,
@@ -27,6 +29,7 @@ type DashboardClientProps = {
 	monitors: Monitor[];
 	analytics: AnalyticsSummary;
 	lastChecks: Record<string, string>;
+	trend: ChartBucket[];
 	now: number;
 };
 
@@ -72,6 +75,7 @@ export default function DashboardClient({
 	monitors,
 	analytics,
 	lastChecks,
+	trend,
 	now,
 }: DashboardClientProps) {
 	const router = useRouter();
@@ -107,6 +111,7 @@ export default function DashboardClient({
 			: null;
 
 	const hasChecks = analytics.totalChecks > 0;
+
 	const staleMonitors = monitors.filter((monitor) =>
 		isMonitorStale(
 			{ ...monitor, lastCheckedAt: lastChecks[monitor.id] ?? null },
@@ -132,7 +137,7 @@ export default function DashboardClient({
 					type="button"
 					onClick={refresh}
 					disabled={isPending}
-					className="inline-flex cursor-pointer min-h-10 items-center justify-center rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/5 disabled:cursor-wait disabled:opacity-50"
+					className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/5 disabled:cursor-wait disabled:opacity-50"
 				>
 					{isPending ? "Refreshing..." : "Refresh data"}
 				</button>
@@ -220,6 +225,29 @@ export default function DashboardClient({
 						value={analytics.openIncidents}
 						description={`${analytics.incidentsStarted} started, ${analytics.incidentsResolved} resolved in this period`}
 					/>
+				</div>
+
+				<div className="rounded-2xl border border-white/10 bg-slate-900/50 p-5">
+					<h3 className="text-sm font-medium text-white">
+						Response time across all monitors
+					</h3>
+					<p className="mt-1 mb-4 text-xs leading-5 text-slate-500">
+						Average of successful checks per interval, oldest to newest. Color
+						shows how many checks in that interval passed, and a dot marks an
+						interval that was unusually slow.
+					</p>
+
+					{hasChecks ? (
+						<ResponseTimeChart
+							buckets={trend}
+							showTime={analytics.range !== "30d"}
+							label="Average response time per interval across all monitors"
+						/>
+					) : (
+						<p className="rounded-xl border border-white/10 p-6 text-sm text-slate-400">
+							A chart will appear once checks are recorded in this period.
+						</p>
+					)}
 				</div>
 			</section>
 
@@ -363,9 +391,10 @@ export default function DashboardClient({
 
 			<p className="text-xs leading-5 text-slate-500">
 				Uptime counts successful checks as up. Timeouts and failed checks count
-				as down. Response time is averaged over successful checks only. Open
-				incidents is the current count and does not depend on the selected
-				period.
+				as down. Response time is averaged over successful checks only. An
+				interval is marked unusually slow when it is above twice the median and
+				at least 500 ms. Open incidents is the current count and does not depend
+				on the selected period.
 			</p>
 		</div>
 	);

@@ -7,11 +7,18 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { ResponseTimeChart } from "@/components/charts/response-time-chart";
+import { LocalDate } from "@/components/ui/local-date";
+import type { ChartBucket } from "@/lib/data/analytics-buckets";
 import {
 	ANALYTICS_RANGES,
 	type AnalyticsRange,
+	bucketSecondsForSpan,
 	DEFAULT_ANALYTICS_RANGE,
+	MAX_CUSTOM_WINDOW_MS,
+	MIN_CUSTOM_WINDOW_MS,
 } from "@/lib/data/analytics-shared";
+import type { MonitorStatus } from "@/lib/data/monitor-status";
 import { formatDurationMs } from "@/lib/format-duration";
 
 type CheckStatus = "up" | "down" | "timeout" | "error";
@@ -25,20 +32,34 @@ type CheckResult = {
 	errorMessage: string | null;
 };
 
-type ChartBucket = {
-	start: string;
-	total: number;
-	successful: number;
-	averageLatencyMs: number | null;
-};
-
 type CheckSummary = {
-	range: AnalyticsRange;
 	totalChecks: number;
 	successfulChecks: number;
 	failedChecks: number;
 	uptimePercentage: number | null;
 	averageResponseTimeMs: number | null;
+};
+
+type Overview = {
+	status: MonitorStatus;
+	latestCheckedAt: string | null;
+	lastSuccessAt: string | null;
+	lastIncident: {
+		startedAt: string;
+		resolvedAt: string | null;
+		reason: string;
+	} | null;
+};
+
+type ChecksResponse = {
+	range?: string;
+	windowStart?: string;
+	windowEnd?: string;
+	overview?: Overview;
+	summary?: CheckSummary;
+	buckets?: ChartBucket[];
+	checks?: CheckResult[];
+	error?: string;
 };
 
 type Incident = {
@@ -55,8 +76,6 @@ type CheckHistoryProps = {
 
 type TabId = "configuration" | "performance" | "history" | "incidents";
 
-type BucketTone = "healthy" | "degraded" | "down" | "empty";
-
 const tabs: { id: TabId; label: string }[] = [
 	{ id: "configuration", label: "Configuration" },
 	{ id: "performance", label: "Performance" },
@@ -65,9 +84,9 @@ const tabs: { id: TabId; label: string }[] = [
 ];
 
 const RANGE_LABELS: Record<AnalyticsRange, string> = {
-	"24h": "last 24 hours",
-	"7d": "last 7 days",
-	"30d": "last 30 days",
+	"24h": "the last 24 hours",
+	"7d": "the last 7 days",
+	"30d": "the last 30 days",
 };
 
 const statusStyles: Record<CheckStatus, string> = {
@@ -84,18 +103,20 @@ const statusLabels: Record<CheckStatus, string> = {
 	error: "Error",
 };
 
-const toneStyles: Record<BucketTone, string> = {
-	healthy: "bg-emerald-400",
-	degraded: "bg-amber-400",
-	down: "bg-red-400",
-	empty: "bg-white/10",
+const monitorStatusStyles: Record<MonitorStatus, string> = {
+	up: "bg-emerald-500/10 text-emerald-400",
+	down: "bg-red-500/10 text-red-400",
+	stale: "bg-amber-500/10 text-amber-400",
+	"no-data": "bg-slate-500/10 text-slate-300",
+	disabled: "bg-slate-700/60 text-slate-300",
 };
 
-const toneLabels: Record<BucketTone, string> = {
-	healthy: "All checks up",
-	degraded: "Some checks failed",
-	down: "All checks failed",
-	empty: "No checks",
+const monitorStatusLabels: Record<MonitorStatus, string> = {
+	up: "Up",
+	down: "Down",
+	stale: "Not reporting",
+	"no-data": "Waiting for first check",
+	disabled: "Disabled",
 };
 
 function formatTimestamp(value: string): string {
@@ -105,37 +126,47 @@ function formatTimestamp(value: string): string {
 	}).format(new Date(value));
 }
 
-function formatBucketStart(value: string, range: AnalyticsRange): string {
-	return new Intl.DateTimeFormat(
-		undefined,
-		range === "30d"
-			? { dateStyle: "medium" }
-			: { dateStyle: "medium", timeStyle: "short" },
-	).format(new Date(value));
-}
-
 function formatResponseTime(value: number | null): string {
 	return value === null ? "N/A" : `${value} ms`;
 }
 
-function getBucketTone(bucket: ChartBucket): BucketTone {
-	if (bucket.total === 0) {
-		return "empty";
+function formatAgo(value: string | null, now: number): string {
+	if (!value) {
+		return "Never";
 	}
 
-	if (bucket.successful === bucket.total) {
-		return "healthy";
-	}
+	return `${formatDurationMs(now - new Date(value).getTime())} ago`;
+}
 
-	return bucket.successful === 0 ? "down" : "degraded";
+function Stat({
+	label,
+	value,
+	description,
+}: {
+	label: string;
+	value: string;
+	description: string;
+}) {
+	return (
+		<div className="rounded-xl border border-white/10 bg-white/2 p-5">
+			<p className="text-sm text-slate-400">{label}</p>
+			<p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+			<p className="mt-1 text-xs text-slate-500">{description}</p>
+		</div>
+	);
 }
 
 export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 	const [activeTab, setActiveTab] = useState<TabId>("configuration");
-	const [range, setRange] = useState<AnalyticsRange>(DEFAULT_ANALYTICS_RANGE);
-	const [checks, setChecks] = useState<CheckResult[]>([]);
-	const [buckets, setBuckets] = useState<ChartBucket[]>([]);
-	const [summary, setSummary] = useState<CheckSummary | null>(null);
+
+	const [query, setQuery] = useState(`range=${DEFAULT_ANALYTICS_RANGE}`);
+	const [showCustom, setShowCustom] = useState(false);
+	const [customFrom, setCustomFrom] = useState("");
+	const [customTo, setCustomTo] = useState("");
+	const [customError, setCustomError] = useState("");
+
+	const [data, setData] = useState<ChecksResponse | null>(null);
+	const [loadedAt, setLoadedAt] = useState(0);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const controllerRef = useRef<AbortController | null>(null);
@@ -157,24 +188,18 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 
 		try {
 			const response = await fetch(
-				`/api/monitors/${monitorId}/checks?range=${range}`,
+				`/api/monitors/${monitorId}/checks?${query}`,
 				{ signal: controller.signal },
 			);
 
-			const data: {
-				checks?: CheckResult[];
-				buckets?: ChartBucket[];
-				summary?: CheckSummary;
-				error?: string;
-			} = await response.json();
+			const body: ChecksResponse = await response.json();
 
 			if (!response.ok) {
-				throw new Error(data.error ?? "Failed to load check history");
+				throw new Error(body.error ?? "Failed to load check history");
 			}
 
-			setChecks(data.checks ?? []);
-			setBuckets(data.buckets ?? []);
-			setSummary(data.summary ?? null);
+			setData(body);
+			setLoadedAt(Date.now());
 		} catch (cause) {
 			if (controller.signal.aborted) return;
 
@@ -186,7 +211,7 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 				setLoading(false);
 			}
 		}
-	}, [monitorId, range]);
+	}, [monitorId, query]);
 
 	const loadIncidents = useCallback(async () => {
 		incidentsControllerRef.current?.abort();
@@ -202,14 +227,14 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 				signal: controller.signal,
 			});
 
-			const data: { incidents?: Incident[]; error?: string } =
+			const body: { incidents?: Incident[]; error?: string } =
 				await response.json();
 
 			if (!response.ok) {
-				throw new Error(data.error ?? "Failed to load incidents");
+				throw new Error(body.error ?? "Failed to load incidents");
 			}
 
-			setIncidents(data.incidents ?? []);
+			setIncidents(body.incidents ?? []);
 			setIncidentsLoadedAt(Date.now());
 		} catch (cause) {
 			if (controller.signal.aborted) return;
@@ -242,15 +267,129 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 		};
 	}, [activeTab, loadIncidents]);
 
-	const showsCheckData = activeTab === "performance" || activeTab === "history";
+	function choosePreset(range: AnalyticsRange) {
+		setShowCustom(false);
+		setCustomError("");
+		setQuery(`range=${range}`);
+	}
 
-	const maxResponseTime = Math.max(
-		1,
-		...buckets.map((bucket) => bucket.averageLatencyMs ?? 0),
-	);
+	function applyCustomRange() {
+		setCustomError("");
+
+		const start = new Date(customFrom).getTime();
+		const end = new Date(customTo).getTime();
+
+		if (!customFrom || !customTo || Number.isNaN(start) || Number.isNaN(end)) {
+			setCustomError("Choose both a start and an end.");
+			return;
+		}
+
+		if (start >= end) {
+			setCustomError("The start must be before the end.");
+			return;
+		}
+
+		if (end - start < MIN_CUSTOM_WINDOW_MS) {
+			setCustomError("The period must be at least 1 hour.");
+			return;
+		}
+
+		if (end - start > MAX_CUSTOM_WINDOW_MS) {
+			setCustomError("The period can be at most 90 days.");
+			return;
+		}
+
+		const params = new URLSearchParams({
+			from: new Date(start).toISOString(),
+			to: new Date(end).toISOString(),
+		});
+
+		setQuery(params.toString());
+	}
+
+	const showsCheckData = activeTab === "performance" || activeTab === "history";
+	const isPreset = data?.range && data.range !== "custom";
+	const activePreset = isPreset ? (data?.range as AnalyticsRange) : null;
+	const customActive = data?.range === "custom";
+
+	const spanMs =
+		data?.windowStart && data.windowEnd
+			? new Date(data.windowEnd).getTime() -
+				new Date(data.windowStart).getTime()
+			: 0;
+	const showTime = bucketSecondsForSpan(spanMs) < 86_400;
+
+	const periodLabel =
+		isPreset && activePreset && RANGE_LABELS[activePreset]
+			? RANGE_LABELS[activePreset]
+			: data?.windowStart && data.windowEnd
+				? `${formatTimestamp(data.windowStart)} to ${formatTimestamp(data.windowEnd)}`
+				: "the selected period";
+
+	const periodShort = activePreset ?? "this period";
 
 	return (
 		<section className="space-y-6">
+			{data?.overview && (
+				<div className="rounded-2xl border border-white/10 bg-slate-900/50 p-5">
+					<div className="flex flex-wrap items-center justify-between gap-3">
+						<div className="flex items-center gap-3">
+							<span
+								className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${monitorStatusStyles[data.overview.status]}`}
+							>
+								{monitorStatusLabels[data.overview.status]}
+							</span>
+							<p className="text-sm text-slate-400">
+								Last check {formatAgo(data.overview.latestCheckedAt, loadedAt)}
+							</p>
+						</div>
+					</div>
+
+					<dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
+						<div>
+							<dt className="text-xs text-slate-500">Last successful check</dt>
+							<dd className="mt-1 text-slate-300">
+								{data.overview.lastSuccessAt ? (
+									<>
+										<LocalDate value={data.overview.lastSuccessAt} />
+										<span className="text-slate-500">
+											{" "}
+											({formatAgo(data.overview.lastSuccessAt, loadedAt)})
+										</span>
+									</>
+								) : (
+									"Never"
+								)}
+							</dd>
+						</div>
+
+						<div>
+							<dt className="text-xs text-slate-500">Last outage</dt>
+							<dd className="mt-1 text-slate-300">
+								{data.overview.lastIncident ? (
+									<>
+										<LocalDate value={data.overview.lastIncident.startedAt} />
+										<span className="text-slate-500">
+											{" "}
+											(
+											{data.overview.lastIncident.resolvedAt
+												? `lasted ${formatDurationMs(new Date(data.overview.lastIncident.resolvedAt).getTime() - new Date(data.overview.lastIncident.startedAt).getTime())}`
+												: "still open"}
+											)
+										</span>
+										<span className="mt-1 block wrap-break-word text-xs text-slate-500">
+											{data.overview.lastIncident.reason}
+										</span>
+									</>
+								) : (
+									"None recorded"
+								)}
+							</dd>
+						</div>
+					</dl>
+				</div>
+			)}
+
 			<div
 				aria-label="Monitor sections"
 				className="flex gap-1 border-b border-white/10"
@@ -305,81 +444,131 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 
 			{activeTab === "performance" && (
 				<div className="space-y-6" role="tabpanel">
-					<div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+					<div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
 						<div>
 							<h2 className="text-lg font-semibold text-white">
 								Performance overview
 							</h2>
 							<p className="mt-1 text-sm text-slate-400">
-								Based on recorded checks from the {RANGE_LABELS[range]}.
+								Based on recorded checks from {periodLabel}.
 							</p>
 						</div>
 
-						<fieldset className="m-0 inline-flex min-w-0 self-start rounded-lg border border-white/10 p-1">
+						<fieldset className="m-0 inline-flex min-w-0 flex-wrap self-start rounded-lg border border-white/10 p-1">
 							<legend className="sr-only">Time range</legend>
 							{ANALYTICS_RANGES.map((option) => (
 								<button
-									aria-pressed={range === option}
+									aria-pressed={activePreset === option}
 									className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-										range === option
+										activePreset === option
 											? "bg-cyan-400 text-slate-950"
 											: "text-slate-300 hover:bg-white/5"
 									}`}
 									key={option}
-									onClick={() => setRange(option)}
+									onClick={() => choosePreset(option)}
 									type="button"
 								>
 									{option}
 								</button>
 							))}
+							<button
+								aria-pressed={customActive || showCustom}
+								className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+									customActive || showCustom
+										? "bg-cyan-400 text-slate-950"
+										: "text-slate-300 hover:bg-white/5"
+								}`}
+								onClick={() => setShowCustom((current) => !current)}
+								type="button"
+							>
+								Custom
+							</button>
 						</fieldset>
 					</div>
 
-					{!loading && !error && (
-						<>
-							{summary && (
-								<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-									<div className="rounded-xl border border-white/10 bg-white/2 p-5">
-										<p className="text-sm text-slate-400">
-											{summary.range} uptime
-										</p>
-										<p className="mt-2 text-2xl font-semibold text-white">
-											{summary.uptimePercentage === null
-												? "N/A"
-												: `${summary.uptimePercentage.toFixed(2)}%`}
-										</p>
-										<p className="mt-1 text-xs text-slate-500">
-											{summary.totalChecks === 0
-												? "No checks recorded in this period"
-												: `${summary.successfulChecks} of ${summary.totalChecks} checks succeeded`}
-										</p>
-									</div>
-
-									<div className="rounded-xl border border-white/10 bg-white/2 p-5">
-										<p className="text-sm text-slate-400">
-											Average response time
-										</p>
-										<p className="mt-2 text-2xl font-semibold text-white">
-											{formatResponseTime(summary.averageResponseTimeMs)}
-										</p>
-										<p className="mt-1 text-xs text-slate-500">
-											Successful checks only
-										</p>
-									</div>
-
-									<div className="rounded-xl border border-white/10 bg-white/2 p-5">
-										<p className="text-sm text-slate-400">
-											Checks in {summary.range}
-										</p>
-										<p className="mt-2 text-2xl font-semibold text-white">
-											{summary.totalChecks}
-										</p>
-										<p className="mt-1 text-xs text-slate-500">
-											{summary.failedChecks} failed in this period
-										</p>
-									</div>
+					{showCustom && (
+						<div className="space-y-3 rounded-xl border border-white/10 bg-white/2 p-4">
+							<div className="flex flex-wrap items-end gap-4">
+								<div className="space-y-1">
+									<label
+										htmlFor="custom-from"
+										className="block text-xs text-slate-500"
+									>
+										From
+									</label>
+									<input
+										id="custom-from"
+										type="datetime-local"
+										value={customFrom}
+										onChange={(event) => setCustomFrom(event.target.value)}
+										className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400"
+									/>
 								</div>
+
+								<div className="space-y-1">
+									<label
+										htmlFor="custom-to"
+										className="block text-xs text-slate-500"
+									>
+										To
+									</label>
+									<input
+										id="custom-to"
+										type="datetime-local"
+										value={customTo}
+										onChange={(event) => setCustomTo(event.target.value)}
+										className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400"
+									/>
+								</div>
+
+								<button
+									type="button"
+									onClick={applyCustomRange}
+									className="cursor-pointer rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
+								>
+									Apply
+								</button>
+							</div>
+
+							<p className="text-xs text-slate-500">
+								Between 1 hour and 90 days, in your local time.
+							</p>
+
+							{customError && (
+								<p role="alert" className="text-sm text-red-300">
+									{customError}
+								</p>
 							)}
+						</div>
+					)}
+
+					{!loading && !error && data?.summary && (
+						<>
+							<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+								<Stat
+									label={`Uptime (${periodShort})`}
+									value={
+										data.summary.uptimePercentage === null
+											? "N/A"
+											: `${data.summary.uptimePercentage.toFixed(2)}%`
+									}
+									description={
+										data.summary.totalChecks === 0
+											? "No checks recorded in this period"
+											: `${data.summary.successfulChecks} of ${data.summary.totalChecks} checks succeeded`
+									}
+								/>
+								<Stat
+									label="Average response time"
+									value={formatResponseTime(data.summary.averageResponseTimeMs)}
+									description="Successful checks only"
+								/>
+								<Stat
+									label={`Checks (${periodShort})`}
+									value={String(data.summary.totalChecks)}
+									description={`${data.summary.failedChecks} failed in this period`}
+								/>
+							</div>
 
 							<div>
 								<h2 className="text-lg font-semibold text-white">
@@ -388,10 +577,10 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 								<p className="mt-1 text-sm text-slate-400">
 									Average response time of successful checks per interval, from
 									oldest to newest. Color shows how many checks in that interval
-									passed.
+									passed, and a dot marks an interval that was unusually slow.
 								</p>
 
-								{summary?.totalChecks === 0 ? (
+								{data.summary.totalChecks === 0 ? (
 									<div className="mt-4 rounded-xl border border-white/10 p-6">
 										<p className="text-sm text-slate-400">
 											A chart will appear once checks are recorded in this
@@ -400,53 +589,11 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 									</div>
 								) : (
 									<div className="mt-4 rounded-xl border border-white/10 p-5">
-										<div
-											aria-label="Average response time per interval"
-											className="flex h-36 items-end gap-1"
-											role="img"
-										>
-											{buckets.map((bucket) => {
-												const tone = getBucketTone(bucket);
-												const height =
-													tone === "empty"
-														? 4
-														: bucket.averageLatencyMs === null
-															? 8
-															: Math.max(
-																	8,
-																	(bucket.averageLatencyMs / maxResponseTime) *
-																		100,
-																);
-
-												return (
-													<div
-														className={`min-w-0 flex-1 rounded-t-sm ${toneStyles[tone]}`}
-														key={bucket.start}
-														style={{ height: `${height}%` }}
-														title={
-															tone === "empty"
-																? `${formatBucketStart(bucket.start, range)}: no checks`
-																: `${formatBucketStart(bucket.start, range)}: ${bucket.successful} of ${bucket.total} checks up, average ${formatResponseTime(bucket.averageLatencyMs)}`
-														}
-													/>
-												);
-											})}
-										</div>
-
-										<div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-400">
-											{(Object.keys(toneLabels) as BucketTone[]).map((tone) => (
-												<span
-													className="inline-flex items-center gap-2"
-													key={tone}
-												>
-													<span
-														aria-hidden="true"
-														className={`size-2 rounded-sm ${toneStyles[tone]}`}
-													/>
-													{toneLabels[tone]}
-												</span>
-											))}
-										</div>
+										<ResponseTimeChart
+											buckets={data.buckets ?? []}
+											showTime={showTime}
+											label="Average response time per interval"
+										/>
 									</div>
 								)}
 							</div>
@@ -455,7 +602,7 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 				</div>
 			)}
 
-			{activeTab === "history" && !loading && !error && (
+			{activeTab === "history" && !loading && !error && data && (
 				<div className="space-y-4" role="tabpanel">
 					<div>
 						<h2 className="text-lg font-semibold text-white">Check history</h2>
@@ -464,7 +611,7 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 						</p>
 					</div>
 
-					{checks.length === 0 ? (
+					{(data.checks ?? []).length === 0 ? (
 						<div className="rounded-xl border border-white/10 p-6">
 							<p className="text-sm font-medium text-white">
 								No checks recorded yet
@@ -494,7 +641,7 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 									</tr>
 								</thead>
 								<tbody className="divide-y divide-white/5">
-									{checks.map((check) => (
+									{(data.checks ?? []).map((check) => (
 										<tr key={check.id}>
 											<td className="whitespace-nowrap px-4 py-3 text-slate-300">
 												{formatTimestamp(check.checkedAt)}

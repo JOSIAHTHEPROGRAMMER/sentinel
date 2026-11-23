@@ -3,9 +3,12 @@ import "server-only";
 import { and, eq, gte, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { checkResults, incidents, monitors } from "@/lib/db/schema/app";
+import { type ChartBucket, fillBuckets } from "./analytics-buckets";
 import {
 	type AnalyticsRange,
 	type AnalyticsSummary,
+	bucketSecondsForRange,
+	buildBucketStarts,
 	calculateUptimePercentage,
 	rangeToMs,
 } from "./analytics-shared";
@@ -61,6 +64,41 @@ export async function getAnalyticsSummary(
 			incidentsStarted: incidentStats?.started ?? 0,
 			incidentsResolved: incidentStats?.resolved ?? 0,
 		};
+	});
+}
+
+export async function getDashboardTrend(
+	userId: string,
+	range: AnalyticsRange,
+): Promise<ChartBucket[]> {
+	const now = Date.now();
+	const bucketSeconds = bucketSecondsForRange(range);
+	const starts = buildBucketStarts(range, now);
+	const since = new Date(starts[0] ?? now - rangeToMs(range));
+
+	return db.transaction(async (tx) => {
+		await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+
+		const bucketIndex = sql<number>`floor(extract(epoch from ${checkResults.checkedAt}) / ${sql.raw(String(bucketSeconds))})::int`;
+
+		const rows = await tx
+			.select({
+				bucket: bucketIndex,
+				total: sql<number>`count(*)::int`,
+				successful: sql<number>`(count(*) filter (where ${checkResults.status} = 'up'))::int`,
+				averageLatencyMs: sql<
+					number | null
+				>`(round(avg(${checkResults.latencyMs}) filter (where ${checkResults.status} = 'up')))::int`,
+			})
+			.from(checkResults)
+			.innerJoin(monitors, eq(monitors.id, checkResults.monitorId))
+			.where(
+				and(isNull(monitors.deletedAt), gte(checkResults.checkedAt, since)),
+			)
+			.groupBy(bucketIndex)
+			.orderBy(bucketIndex);
+
+		return fillBuckets(rows, starts, bucketSeconds);
 	});
 }
 
