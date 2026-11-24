@@ -268,3 +268,35 @@ export const monitorState = appSchema.table(
 		}),
 	],
 );
+
+export const monitorLeases = appSchema.table(
+	"monitor_leases",
+	{
+		monitorId: uuid("monitor_id")
+			.primaryKey()
+			.references(() => monitors.id, { onDelete: "cascade" }),
+		lastStartedAt: timestamp("last_started_at", { withTimezone: true }),
+		leaseOwner: text("lease_owner"),
+		leaseUntil: timestamp("lease_until", { withTimezone: true }),
+	},
+	() => [
+		pgPolicy("monitor_leases_worker_access", {
+			for: "all",
+			to: "sentinel_worker",
+			using: sql`EXISTS (
+				SELECT 1
+				FROM app.monitors AS m
+				WHERE m.id = monitor_id
+				AND m.enabled = true
+				AND m.deleted_at IS NULL
+			)`,
+			withCheck: sql`EXISTS (
+				SELECT 1
+				FROM app.monitors AS m
+				WHERE m.id = monitor_id
+				AND m.enabled = true
+				AND m.deleted_at IS NULL
+			)`,
+		}),
+	],
+);

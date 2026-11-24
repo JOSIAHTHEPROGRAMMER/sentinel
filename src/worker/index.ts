@@ -1,12 +1,17 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
-import { monitors } from "@/lib/db/schema/app";
+import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
+import { sql } from "drizzle-orm";
 import { closeWorkerDb, workerDb } from "@/lib/db/worker";
+import { createLeaseStore } from "@/lib/monitoring/lease-store";
 import { createAccountPurger } from "@/lib/monitoring/purge-accounts";
 import { runMonitorCheck } from "@/lib/monitoring/run-monitor-check";
 import { createMonitorScheduler } from "@/lib/monitoring/scheduler";
 
 const POLL_INTERVAL_MS = 15_000;
 const FORCE_EXIT_MS = 30_000;
+
+// Identifies this process in leases and logs, so two workers can be told apart
+const instanceId = `${hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`;
 
 let stopping = false;
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -19,6 +24,7 @@ function log(
 	const line = JSON.stringify({
 		time: new Date().toISOString(),
 		level,
+		instanceId,
 		event,
 		...fields,
 	});
@@ -36,15 +42,14 @@ function describeError(error: unknown) {
 		: { message: String(error) };
 }
 
+const leases = createLeaseStore({
+	execute: (query) => workerDb.execute(query),
+	owner: instanceId,
+});
+
 const scheduler = createMonitorScheduler({
-	getEligibleMonitors: async () =>
-		workerDb
-			.select({
-				id: monitors.id,
-				intervalSeconds: monitors.intervalSeconds,
-			})
-			.from(monitors)
-			.where(and(eq(monitors.enabled, true), isNull(monitors.deletedAt))),
+	claimDue: (limit) => leases.claimDue(limit),
+	release: (monitorId) => leases.release(monitorId),
 
 	runCheck: async (monitorId) => {
 		const startedAt = Date.now();

@@ -64,6 +64,13 @@
       "when": 1795460870881,
       "tag": "0008_incident_thresholds",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795523448883,
+      "tag": "0009_monitor_leases",
+      "breakpoints": true
     }
   ]
 }
