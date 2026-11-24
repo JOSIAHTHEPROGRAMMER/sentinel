@@ -1,5 +1,5 @@
 "use client";
-
+import Link from "next/link";
 import {
 	type ReactNode,
 	useCallback,
@@ -45,6 +45,8 @@ type Overview = {
 	latestCheckedAt: string | null;
 	lastSuccessAt: string | null;
 	lastIncident: {
+		id: string;
+
 		startedAt: string;
 		resolvedAt: string | null;
 		reason: string;
@@ -380,6 +382,13 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 										<span className="mt-1 block wrap-break-word text-xs text-slate-500">
 											{data.overview.lastIncident.reason}
 										</span>
+
+										<Link
+											href={`/incidents/${data.overview.lastIncident.id}`}
+											className="mt-1 inline-block text-xs text-cyan-300 hover:text-cyan-200"
+										>
+											View incident details
+										</Link>
 									</>
 								) : (
 									"None recorded"
@@ -734,6 +743,9 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 										<th className="border-b border-white/10 px-4 py-3 font-medium">
 											Reason
 										</th>
+										<th className="border-b border-white/10 px-4 py-3 font-medium">
+											Details
+										</th>
 									</tr>
 								</thead>
 								<tbody className="divide-y divide-white/5">
@@ -771,6 +783,14 @@ export function CheckHistory({ monitorId, configuration }: CheckHistoryProps) {
 												</td>
 												<td className="max-w-xs wrap-break-word px-4 py-3 text-slate-300">
 													{incident.reason}
+												</td>
+												<td className="whitespace-nowrap px-4 py-3">
+													<Link
+														href={`/incidents/${incident.id}`}
+														className="text-cyan-300 hover:text-cyan-200"
+													>
+														View
+													</Link>
 												</td>
 											</tr>
 										);

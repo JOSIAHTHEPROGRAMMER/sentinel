@@ -1,5 +1,5 @@
 "use client";
-
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { LocalDate } from "@/components/ui/local-date";
@@ -339,7 +339,14 @@ export default function IncidentsClient({
 								<article key={incident.id} className="space-y-4 p-5">
 									<div className="flex flex-wrap items-start justify-between gap-3">
 										<div className="min-w-0">
-											<h3 className="font-medium">{incident.monitorName}</h3>
+											<h3 className="font-medium">
+												<Link
+													href={`/incidents/${incident.id}`}
+													className="hover:text-cyan-300"
+												>
+													{incident.monitorName}
+												</Link>
+											</h3>
 											<p className="mt-1 text-xs text-slate-500">
 												Project:{" "}
 												<span className="text-cyan-300">

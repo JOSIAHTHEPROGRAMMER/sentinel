@@ -121,6 +121,7 @@ export async function getMonitorChecksData(
 
 		const [lastIncident] = await tx
 			.select({
+				id: incidents.id,
 				startedAt: incidents.startedAt,
 				resolvedAt: incidents.resolvedAt,
 				reason: incidents.reason,
@@ -149,6 +150,7 @@ export async function getMonitorChecksData(
 				lastSuccessAt: lastSuccess?.checkedAt.toISOString() ?? null,
 				lastIncident: lastIncident
 					? {
+							id: lastIncident.id,
 							startedAt: lastIncident.startedAt.toISOString(),
 							resolvedAt: lastIncident.resolvedAt?.toISOString() ?? null,
 							reason: lastIncident.reason,
