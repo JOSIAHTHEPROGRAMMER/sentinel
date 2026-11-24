@@ -11,6 +11,8 @@ type Monitor = {
 	enabled: boolean;
 	intervalSeconds: number;
 	timeoutMs: number;
+	failureThreshold: number;
+	recoveryThreshold: number;
 	createdAt: string;
 	updatedAt: string;
 };
@@ -34,6 +36,31 @@ type ProjectsResponse = {
 	error?: string;
 };
 
+const MIN_THRESHOLD = 1;
+const MAX_THRESHOLD = 10;
+
+function isValidThreshold(value: number): boolean {
+	return (
+		Number.isInteger(value) && value >= MIN_THRESHOLD && value <= MAX_THRESHOLD
+	);
+}
+
+function describeDuration(seconds: number): string {
+	if (seconds < 60) {
+		return `${seconds} seconds`;
+	}
+
+	const minutes = Math.round(seconds / 60);
+
+	if (minutes < 60) {
+		return `about ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+	}
+
+	const hours = Math.round((minutes / 60) * 10) / 10;
+
+	return `about ${hours} ${hours === 1 ? "hour" : "hours"}`;
+}
+
 export default function MonitorDetailsClient({
 	initialMonitor,
 }: MonitorDetailsClientProps) {
@@ -52,6 +79,12 @@ export default function MonitorDetailsClient({
 		String(initialMonitor.intervalSeconds),
 	);
 	const [timeoutMs, setTimeoutMs] = useState(String(initialMonitor.timeoutMs));
+	const [failureThreshold, setFailureThreshold] = useState(
+		String(initialMonitor.failureThreshold),
+	);
+	const [recoveryThreshold, setRecoveryThreshold] = useState(
+		String(initialMonitor.recoveryThreshold),
+	);
 
 	const [saving, setSaving] = useState(false);
 	const [deleting, setDeleting] = useState(false);
@@ -102,6 +135,8 @@ export default function MonitorDetailsClient({
 
 		const interval = Number(intervalSeconds);
 		const timeout = Number(timeoutMs);
+		const failures = Number(failureThreshold);
+		const recoveries = Number(recoveryThreshold);
 
 		if (!Number.isInteger(interval) || interval < 60 || interval > 86400) {
 			setError("Check interval must be between 60 and 86400 seconds.");
@@ -111,6 +146,22 @@ export default function MonitorDetailsClient({
 
 		if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 30000) {
 			setError("Timeout must be between 1000 and 30000 milliseconds.");
+			setSaving(false);
+			return;
+		}
+
+		if (!isValidThreshold(failures)) {
+			setError(
+				`Failures before an incident must be a whole number from ${MIN_THRESHOLD} to ${MAX_THRESHOLD}.`,
+			);
+			setSaving(false);
+			return;
+		}
+
+		if (!isValidThreshold(recoveries)) {
+			setError(
+				`Successes before recovery must be a whole number from ${MIN_THRESHOLD} to ${MAX_THRESHOLD}.`,
+			);
 			setSaving(false);
 			return;
 		}
@@ -126,6 +177,8 @@ export default function MonitorDetailsClient({
 					enabled,
 					intervalSeconds: interval,
 					timeoutMs: timeout,
+					failureThreshold: failures,
+					recoveryThreshold: recoveries,
 				}),
 			});
 
@@ -186,6 +239,29 @@ export default function MonitorDetailsClient({
 			setDeleting(false);
 		}
 	}
+
+	const intervalValue = Number(intervalSeconds);
+	const failureValue = Number(failureThreshold);
+	const recoveryValue = Number(recoveryThreshold);
+
+	const intervalIsValid =
+		Number.isInteger(intervalValue) &&
+		intervalValue >= 60 &&
+		intervalValue <= 86400;
+
+	const incidentHint =
+		intervalIsValid && isValidThreshold(failureValue)
+			? failureValue === 1
+				? "An incident opens as soon as a check fails."
+				: `An incident opens after ${failureValue} failed checks in a row, which is ${describeDuration(failureValue * intervalValue)} of failures at the current interval.`
+			: "";
+
+	const recoveryHint =
+		intervalIsValid && isValidThreshold(recoveryValue)
+			? recoveryValue === 1
+				? "An incident resolves as soon as a check succeeds."
+				: `An incident resolves after ${recoveryValue} successful checks in a row, which is ${describeDuration(recoveryValue * intervalValue)} of success at the current interval.`
+			: "";
 
 	const configuration = (
 		<div className="space-y-8">
@@ -308,6 +384,68 @@ export default function MonitorDetailsClient({
 					</div>
 				</div>
 
+				<div className="space-y-4 rounded-xl border border-white/10 p-4">
+					<div>
+						<p className="text-sm font-medium text-slate-200">
+							Incident sensitivity
+						</p>
+						<p className="mt-1 text-xs leading-5 text-slate-500">
+							Require several checks in a row before an incident opens or
+							closes, so a single failed check doesn't raise a false alarm.
+							Changes apply from the next check and never alter an incident that
+							is already open.
+						</p>
+					</div>
+
+					<div className="grid gap-5 sm:grid-cols-2">
+						<div className="space-y-2">
+							<label
+								htmlFor="failureThreshold"
+								className="block text-sm font-medium text-slate-200"
+							>
+								Failures before an incident
+							</label>
+							<input
+								id="failureThreshold"
+								type="number"
+								required
+								min={MIN_THRESHOLD}
+								max={MAX_THRESHOLD}
+								step={1}
+								value={failureThreshold}
+								onChange={(event) => setFailureThreshold(event.target.value)}
+								className="w-full rounded-lg border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-400"
+							/>
+							<p className="text-xs leading-5 text-slate-500">
+								{incidentHint || `${MIN_THRESHOLD} to ${MAX_THRESHOLD} checks`}
+							</p>
+						</div>
+
+						<div className="space-y-2">
+							<label
+								htmlFor="recoveryThreshold"
+								className="block text-sm font-medium text-slate-200"
+							>
+								Successes before recovery
+							</label>
+							<input
+								id="recoveryThreshold"
+								type="number"
+								required
+								min={MIN_THRESHOLD}
+								max={MAX_THRESHOLD}
+								step={1}
+								value={recoveryThreshold}
+								onChange={(event) => setRecoveryThreshold(event.target.value)}
+								className="w-full rounded-lg border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-400"
+							/>
+							<p className="text-xs leading-5 text-slate-500">
+								{recoveryHint || `${MIN_THRESHOLD} to ${MAX_THRESHOLD} checks`}
+							</p>
+						</div>
+					</div>
+				</div>
+
 				<label className="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-white/10 p-4">
 					<span>
 						<span className="block text-sm font-medium text-slate-200">
@@ -354,7 +492,7 @@ export default function MonitorDetailsClient({
 				</div>
 			</form>
 
-			<section className="flex flex-col items-center justify-center rounded-2xl border border-red-400/20 bg-red-400/3 p-5 text-center sm:p-6">
+			<section className="rounded-2xl border border-red-400/20 bg-red-400/3 p-5 sm:p-6">
 				<h2 className="font-semibold text-red-200">Delete monitor</h2>
 				<p className="mt-2 text-sm leading-6 text-slate-400">
 					This removes the monitor from your active list. The server handles

@@ -17,6 +17,18 @@ type RouteContext = {
 const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const MIN_THRESHOLD = 1;
+const MAX_THRESHOLD = 10;
+
+function isValidThreshold(value: unknown): value is number {
+	return (
+		typeof value === "number" &&
+		Number.isInteger(value) &&
+		value >= MIN_THRESHOLD &&
+		value <= MAX_THRESHOLD
+	);
+}
+
 export async function GET(_request: Request, { params }: RouteContext) {
 	const session = await getSession();
 
@@ -44,6 +56,8 @@ export async function GET(_request: Request, { params }: RouteContext) {
 				enabled: monitors.enabled,
 				intervalSeconds: monitors.intervalSeconds,
 				timeoutMs: monitors.timeoutMs,
+				failureThreshold: monitors.failureThreshold,
+				recoveryThreshold: monitors.recoveryThreshold,
 				createdAt: monitors.createdAt,
 				updatedAt: monitors.updatedAt,
 			})
@@ -102,6 +116,8 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 		"enabled",
 		"intervalSeconds",
 		"timeoutMs",
+		"failureThreshold",
+		"recoveryThreshold",
 		"projectId",
 	];
 
@@ -120,6 +136,8 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 		enabled?: boolean;
 		intervalSeconds?: number;
 		timeoutMs?: number;
+		failureThreshold?: number;
+		recoveryThreshold?: number;
 		projectId?: string | null;
 		updatedAt?: Date;
 	} = {};
@@ -192,6 +210,32 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 		updates.timeoutMs = input.timeoutMs;
 	}
 
+	if ("failureThreshold" in input) {
+		if (!isValidThreshold(input.failureThreshold)) {
+			return NextResponse.json(
+				{
+					error: `Failure threshold must be a whole number between ${MIN_THRESHOLD} and ${MAX_THRESHOLD}`,
+				},
+				{ status: 400 },
+			);
+		}
+
+		updates.failureThreshold = input.failureThreshold;
+	}
+
+	if ("recoveryThreshold" in input) {
+		if (!isValidThreshold(input.recoveryThreshold)) {
+			return NextResponse.json(
+				{
+					error: `Recovery threshold must be a whole number between ${MIN_THRESHOLD} and ${MAX_THRESHOLD}`,
+				},
+				{ status: 400 },
+			);
+		}
+
+		updates.recoveryThreshold = input.recoveryThreshold;
+	}
+
 	if ("projectId" in input) {
 		if (
 			input.projectId !== null &&
@@ -238,6 +282,8 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 				enabled: monitors.enabled,
 				intervalSeconds: monitors.intervalSeconds,
 				timeoutMs: monitors.timeoutMs,
+				failureThreshold: monitors.failureThreshold,
+				recoveryThreshold: monitors.recoveryThreshold,
 				updatedAt: monitors.updatedAt,
 			});
 

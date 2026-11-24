@@ -62,6 +62,8 @@ export const monitors = appSchema.table(
 		url: text("url").notNull(),
 		intervalSeconds: integer("interval_seconds").default(300).notNull(),
 		timeoutMs: integer("timeout_ms").default(10000).notNull(),
+		failureThreshold: integer("failure_threshold").default(1).notNull(),
+		recoveryThreshold: integer("recovery_threshold").default(1).notNull(),
 		enabled: boolean("enabled").default(true).notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.defaultNow()
@@ -87,6 +89,14 @@ export const monitors = appSchema.table(
 			columns: [table.projectId, table.ownerId],
 			foreignColumns: [projects.id, projects.ownerId],
 		}).onDelete("restrict"),
+		check(
+			"monitors_failure_threshold_range",
+			sql`${table.failureThreshold} BETWEEN 1 AND 10`,
+		),
+		check(
+			"monitors_recovery_threshold_range",
+			sql`${table.recoveryThreshold} BETWEEN 1 AND 10`,
+		),
 	],
 );
 
@@ -210,6 +220,51 @@ export const accountDeletions = appSchema.table(
 			to: "sentinel_app",
 			using: sql`user_id = current_setting('app.user_id', true)`,
 			withCheck: sql`user_id = current_setting('app.user_id', true)`,
+		}),
+	],
+);
+
+export const monitorState = appSchema.table(
+	"monitor_state",
+	{
+		monitorId: uuid("monitor_id")
+			.primaryKey()
+			.references(() => monitors.id, { onDelete: "cascade" }),
+		consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
+		consecutiveSuccesses: integer("consecutive_successes").default(0).notNull(),
+		failureStreakStartedAt: timestamp("failure_streak_started_at", {
+			withTimezone: true,
+		}),
+		successStreakStartedAt: timestamp("success_streak_started_at", {
+			withTimezone: true,
+		}),
+		failureReason: text("failure_reason"),
+		lastCheckedAt: timestamp("last_checked_at", {
+			withTimezone: true,
+		}).notNull(),
+	},
+	(table) => [
+		check(
+			"monitor_state_counters_non_negative",
+			sql`${table.consecutiveFailures} >= 0 AND ${table.consecutiveSuccesses} >= 0`,
+		),
+		pgPolicy("monitor_state_worker_access", {
+			for: "all",
+			to: "sentinel_worker",
+			using: sql`EXISTS (
+				SELECT 1
+				FROM app.monitors AS m
+				WHERE m.id = monitor_id
+				AND m.enabled = true
+				AND m.deleted_at IS NULL
+			)`,
+			withCheck: sql`EXISTS (
+				SELECT 1
+				FROM app.monitors AS m
+				WHERE m.id = monitor_id
+				AND m.enabled = true
+				AND m.deleted_at IS NULL
+			)`,
 		}),
 	],
 );

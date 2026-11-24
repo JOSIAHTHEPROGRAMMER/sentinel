@@ -45,6 +45,8 @@ export async function getMonitorForUser(userId: string, monitorId: string) {
 				projectId: monitors.projectId,
 				intervalSeconds: monitors.intervalSeconds,
 				timeoutMs: monitors.timeoutMs,
+				failureThreshold: monitors.failureThreshold,
+				recoveryThreshold: monitors.recoveryThreshold,
 				createdAt: monitors.createdAt,
 				updatedAt: monitors.updatedAt,
 			})

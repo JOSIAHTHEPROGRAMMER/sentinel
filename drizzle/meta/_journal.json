@@ -57,6 +57,13 @@
       "when": 1795359040968,
       "tag": "0007_account_deletions",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795460870881,
+      "tag": "0008_incident_thresholds",
+      "breakpoints": true
     }
   ]
 }

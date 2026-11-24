@@ -347,6 +347,90 @@ describe("PATCH /api/monitors/[id]", () => {
 		expect(transaction).not.toHaveBeenCalled();
 		expect(update).not.toHaveBeenCalled();
 	});
+
+	it("accepts valid failure and recovery thresholds", async () => {
+		const updatedMonitor = {
+			...monitor,
+			failureThreshold: 3,
+			recoveryThreshold: 2,
+		};
+		createTransaction({ updateResult: [updatedMonitor] });
+
+		const response = await PATCH(
+			makeRequest(
+				JSON.stringify({ failureThreshold: 3, recoveryThreshold: 2 }),
+				"PATCH",
+			),
+			context,
+		);
+
+		expect(response.status).toBe(200);
+		expect((await json(response)).monitor).toMatchObject({
+			failureThreshold: 3,
+			recoveryThreshold: 2,
+		});
+		expect(update).toHaveBeenCalledOnce();
+	});
+
+	it("accepts the threshold bounds exactly", async () => {
+		for (const value of [1, 10]) {
+			createTransaction({
+				updateResult: [{ ...monitor, failureThreshold: value }],
+			});
+
+			const response = await PATCH(
+				makeRequest(JSON.stringify({ failureThreshold: value }), "PATCH"),
+				context,
+			);
+
+			expect(response.status, String(value)).toBe(200);
+		}
+	});
+
+	it("rejects thresholds outside 1 to 10", async () => {
+		for (const value of [0, 11, -1, 100]) {
+			const failure = await PATCH(
+				makeRequest(JSON.stringify({ failureThreshold: value }), "PATCH"),
+				context,
+			);
+			const recovery = await PATCH(
+				makeRequest(JSON.stringify({ recoveryThreshold: value }), "PATCH"),
+				context,
+			);
+
+			expect(failure.status, `failure ${value}`).toBe(400);
+			expect(recovery.status, `recovery ${value}`).toBe(400);
+		}
+
+		expect(transaction).not.toHaveBeenCalled();
+		expect(update).not.toHaveBeenCalled();
+	});
+
+	it("rejects non-integer and non-numeric thresholds", async () => {
+		for (const value of [2.5, "3", null, true, Number.NaN]) {
+			const response = await PATCH(
+				makeRequest(JSON.stringify({ failureThreshold: value }), "PATCH"),
+				context,
+			);
+
+			expect(response.status, String(value)).toBe(400);
+		}
+
+		expect(update).not.toHaveBeenCalled();
+	});
+
+	it("includes the thresholds when returning a monitor", async () => {
+		createTransaction({
+			selectResult: [{ ...monitor, failureThreshold: 1, recoveryThreshold: 1 }],
+		});
+
+		const response = await GET(new Request("http://localhost"), context);
+
+		expect((await json(response)).monitor).toMatchObject({
+			failureThreshold: 1,
+			recoveryThreshold: 1,
+		});
+	});
 });
 
 describe("DELETE /api/monitors/[id]", () => {

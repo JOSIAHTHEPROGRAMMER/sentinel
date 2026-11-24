@@ -19,6 +19,9 @@ export async function runMonitorCheck(
 			id: monitors.id,
 			url: monitors.url,
 			timeoutMs: monitors.timeoutMs,
+			intervalSeconds: monitors.intervalSeconds,
+			failureThreshold: monitors.failureThreshold,
+			recoveryThreshold: monitors.recoveryThreshold,
 		})
 		.from(monitors)
 		.where(
@@ -39,6 +42,11 @@ export async function runMonitorCheck(
 	await recordMonitorCheck({
 		monitorId: monitor.id,
 		result,
+		config: {
+			failureThreshold: monitor.failureThreshold,
+			recoveryThreshold: monitor.recoveryThreshold,
+			intervalSeconds: monitor.intervalSeconds,
+		},
 	});
 
 	return {
