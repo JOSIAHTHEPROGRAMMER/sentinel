@@ -6,6 +6,7 @@
 		"dev": "next dev",
 		"build": "next build",
 		"start": "next start",
+		"test:integration": "vitest run --config vitest.integration.config.mts",
 		"format": "biome format --write .",
 		"verify": "biome check . && vitest run",
 		"seed": "node --conditions=react-server --env-file=.env.local --import tsx scripts/seed.ts",
