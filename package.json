@@ -6,6 +6,7 @@
 		"dev": "next dev",
 		"build": "next build",
 		"start": "next start",
+		"test:e2e": "playwright test",
 		"test:integration": "vitest run --config vitest.integration.config.mts",
 		"format": "biome format --write .",
 		"verify": "biome check . && vitest run",
@@ -31,6 +32,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.6.8",
+		"@playwright/test": "^1.65.1",
 		"@tailwindcss/turbopack": "^4.3.5",
 		"@types/node": "^26.6.6",
 		"@types/pg": "^8.23.1",
