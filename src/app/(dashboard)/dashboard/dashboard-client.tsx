@@ -13,12 +13,14 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { ResponseTimeChart } from "@/components/charts/response-time-chart";
 import { Button, buttonStyles } from "@/components/ui/button";
-import { type Column, DataTable } from "@/components/ui/data-table";
+import { type Column, DataTable, RowLink } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Figure } from "@/components/ui/figure";
 import { LocalDate } from "@/components/ui/local-date";
 import { MonitorStatusBadge } from "@/components/ui/monitor-status-badge";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/cn";
 import type { ChartBucket } from "@/lib/data/analytics-buckets";
 import {
@@ -97,59 +99,6 @@ const summaryStyles = {
   neutral: { icon: CircleMinus, className: "text-neutral" },
 };
 
-function Figure({
-  label,
-  value,
-  detail,
-}: {
-  label: string;
-  value: string;
-  detail: string;
-}) {
-  return (
-    <div>
-      <p className="text-ui text-fg-muted">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums text-fg">
-        {value}
-      </p>
-      <p className="mt-1 text-ui text-fg-subtle">{detail}</p>
-    </div>
-  );
-}
-
-function RangeSelector({
-  value,
-  onChange,
-}: {
-  value: AnalyticsRange;
-  onChange: (range: AnalyticsRange) => void;
-}) {
-  return (
-    <div
-      role="group"
-      aria-label="Time range"
-      className="inline-flex rounded-control border border-border p-0.5"
-    >
-      {ANALYTICS_RANGES.map((range) => (
-        <button
-          key={range}
-          type="button"
-          aria-pressed={value === range}
-          onClick={() => onChange(range)}
-          className={cn(
-            "h-7 cursor-pointer rounded-control px-2.5 text-ui font-medium transition-colors",
-            value === range
-              ? "bg-accent-subtle text-fg"
-              : "text-fg-muted hover:text-fg",
-          )}
-        >
-          {range}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 export default function DashboardClient({
   rows,
   analytics,
@@ -192,12 +141,7 @@ export default function DashboardClient({
       header: "Monitor",
       cell: (row) => (
         <div className="min-w-0 max-w-sm">
-          <Link
-            href={`/monitors/${row.id}`}
-            className="font-medium text-fg hover:text-accent-text hover:underline"
-          >
-            {row.name}
-          </Link>
+          <RowLink href={`/monitors/${row.id}`}>{row.name}</RowLink>
           <p className="truncate font-mono text-xs text-fg-subtle">{row.url}</p>
         </div>
       ),
@@ -295,7 +239,15 @@ export default function DashboardClient({
         title="Performance"
         description={RANGE_LABELS[analytics.range]}
         actions={
-          <RangeSelector value={analytics.range} onChange={changeRange} />
+          <SegmentedControl
+            label="Time range"
+            value={analytics.range}
+            onChange={(value) => changeRange(value as AnalyticsRange)}
+            options={ANALYTICS_RANGES.map((range) => ({
+              value: range,
+              label: range,
+            }))}
+          />
         }
         className={cn("transition-opacity", isPending && "opacity-60")}
       >
@@ -371,6 +323,7 @@ export default function DashboardClient({
           />
         ) : (
           <DataTable
+            interactive
             caption="Monitors and their current status"
             columns={columns}
             rows={rows}

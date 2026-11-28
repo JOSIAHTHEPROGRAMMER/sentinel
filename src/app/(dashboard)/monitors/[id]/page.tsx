@@ -1,55 +1,92 @@
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { ChecksData } from "@/features/checks/types";
 import { getSession } from "@/lib/auth/session";
+import {
+  DEFAULT_ANALYTICS_RANGE,
+  windowForRange,
+} from "@/lib/data/analytics-shared";
+import { getIncidentsForMonitor } from "@/lib/data/incidents";
+import { getMonitorChecksData } from "@/lib/data/monitor-checks";
 import { getMonitorForUser } from "@/lib/data/monitors";
+import { getProjectOptions } from "@/lib/data/project-options";
 import MonitorDetailsClient from "./monitor-details-client";
 
 type PageProps = {
-	params: Promise<{ id: string }>;
+  params: Promise<{ id: string }>;
 };
 
 async function MonitorDetailsContent({ params }: PageProps) {
-	const session = await getSession();
+  const session = await getSession();
 
-	if (!session) {
-		redirect("/sign-in");
-	}
+  if (!session) {
+    redirect("/sign-in");
+  }
 
-	const { id } = await params;
+  const { id } = await params;
 
-	const isUuid =
-		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  const isUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
-	if (!isUuid) {
-		notFound();
-	}
+  if (!isUuid) {
+    notFound();
+  }
 
-	const monitor = await getMonitorForUser(session.user.id, id);
+  const userId = session.user.id;
+  const now = Date.now();
+  const timeWindow = windowForRange(DEFAULT_ANALYTICS_RANGE, now);
 
-	if (!monitor) {
-		notFound();
-	}
+  const [monitor, checks, incidents, projects] = await Promise.all([
+    getMonitorForUser(userId, id),
+    getMonitorChecksData(userId, id, timeWindow, now),
+    getIncidentsForMonitor(userId, id),
+    getProjectOptions(userId),
+  ]);
 
-	return <MonitorDetailsClient initialMonitor={monitor} />;
+  if (!monitor || !checks || !incidents) {
+    notFound();
+  }
+
+  const initialData: ChecksData = {
+    range: DEFAULT_ANALYTICS_RANGE,
+    windowStart: new Date(timeWindow.startMs).toISOString(),
+    windowEnd: new Date(timeWindow.endMs).toISOString(),
+    overview: checks.overview,
+    summary: checks.summary,
+    buckets: checks.buckets,
+    checks: checks.checks.map((check) => ({
+      ...check,
+      checkedAt: check.checkedAt.toISOString(),
+    })),
+  };
+
+  return (
+    <MonitorDetailsClient
+      initialMonitor={monitor}
+      projects={projects}
+      initialData={initialData}
+      incidents={incidents}
+      now={now}
+    />
+  );
 }
 
 function MonitorDetailsSkeleton() {
-	return (
-		<div className="animate-pulse space-y-6">
-			<div className="space-y-3">
-				<div className="h-8 w-64 rounded bg-slate-800" />
-				<div className="h-4 w-80 max-w-full rounded bg-slate-800" />
-			</div>
-			<div className="h-40 rounded-2xl border border-white/10 bg-slate-900/70" />
-			<div className="h-64 rounded-2xl border border-white/10 bg-slate-900/70" />
-		</div>
-	);
+  return (
+    <div aria-busy="true" className="space-y-6">
+      <Skeleton className="h-7 w-64" />
+      <Skeleton className="h-24 w-full" />
+      <Skeleton className="h-10 w-full" />
+      <Skeleton className="h-80 w-full" />
+    </div>
+  );
 }
 
 export default function MonitorDetailsPage({ params }: PageProps) {
-	return (
-		<Suspense fallback={<MonitorDetailsSkeleton />}>
-			<MonitorDetailsContent params={params} />
-		</Suspense>
-	);
+  return (
+    <Suspense fallback={<MonitorDetailsSkeleton />}>
+      <MonitorDetailsContent params={params} />
+    </Suspense>
+  );
 }

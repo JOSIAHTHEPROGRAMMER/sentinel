@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { Button, buttonStyles } from "@/components/ui/button";
-import { type Column, DataTable } from "@/components/ui/data-table";
+import { type Column, DataTable, RowLink } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { MonitorStatusBadge } from "@/components/ui/monitor-status-badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -86,12 +86,7 @@ export default function MonitorsClient({
       header: "Monitor",
       cell: (row) => (
         <div className="min-w-0 max-w-sm">
-          <Link
-            href={`/monitors/${row.id}`}
-            className="font-medium text-fg hover:text-accent-text hover:underline"
-          >
-            {row.name}
-          </Link>
+          <RowLink href={`/monitors/${row.id}`}>{row.name}</RowLink>
           <p className="truncate font-mono text-xs text-fg-subtle">{row.url}</p>
         </div>
       ),
@@ -207,6 +202,7 @@ export default function MonitorsClient({
           />
         ) : (
           <DataTable
+            interactive
             caption="Monitors and their current status"
             columns={columns}
             rows={filtered}
