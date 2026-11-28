@@ -71,6 +71,13 @@
       "when": 1795523448883,
       "tag": "0009_monitor_leases",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795816563838,
+      "tag": "0010_check_rollups",
+      "breakpoints": true
     }
   ]
 }

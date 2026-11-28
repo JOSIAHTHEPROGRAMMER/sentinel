@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { like, sql } from "drizzle-orm";
+import { Pool } from "pg";
 import { closeDb, db } from "@/lib/db";
 import {
 	checkResults,
@@ -14,6 +15,7 @@ import { closeWorkerDb, workerDb } from "@/lib/db/worker";
 export const TEST_USER_PREFIX = "itest-";
 
 const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
 
 export type SeedCheck = {
 	minutesAgo: number;
@@ -40,6 +42,33 @@ export type SeedMonitorOptions = {
 };
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+// The app and worker roles cannot write the rollup watermark, so tests that
+// seed old checks use the migrator role, which owns the table
+let migratorPool: Pool | undefined;
+
+function getMigratorPool(): Pool {
+	if (!migratorPool) {
+		const connectionString = process.env.MIGRATION_DATABASE_URL;
+
+		if (!connectionString) {
+			throw new Error("MIGRATION_DATABASE_URL is not configured");
+		}
+
+		migratorPool = new Pool({ connectionString, max: 2 });
+	}
+
+	return migratorPool;
+}
+
+// Moves the watermark back so raw rows at or after `to` are read as raw data.
+// It never moves it forward.
+export async function rewindWatermark(to: Date): Promise<void> {
+	await getMigratorPool().query(
+		"UPDATE app.rollup_state SET rolled_through = LEAST(rolled_through, $1::timestamptz)",
+		[to.toISOString()],
+	);
+}
 
 export async function asUser<T>(
 	userId: string,
@@ -113,6 +142,13 @@ export async function seedMonitor(
 		.values({ monitorId, lastStartedAt: new Date(now + 60 * MINUTE) });
 
 	if (checks.length > 0) {
+		// Seeded checks may be older than the rollup watermark, which production
+		// never writes behind
+		const oldestMs =
+			now - Math.max(...checks.map((c) => c.minutesAgo)) * MINUTE;
+
+		await rewindWatermark(new Date(Math.floor(oldestMs / HOUR) * HOUR - HOUR));
+
 		await workerDb.insert(checkResults).values(
 			checks.map((check) => ({
 				monitorId,
@@ -171,5 +207,9 @@ export async function cleanupTestUsers(): Promise<void> {
 }
 
 export async function closeConnections(): Promise<void> {
-	await Promise.all([closeDb(), closeWorkerDb()]);
+	await Promise.all([
+		closeDb(),
+		closeWorkerDb(),
+		migratorPool?.end() ?? Promise.resolve(),
+	]);
 }

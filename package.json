@@ -11,7 +11,12 @@
 		"format": "biome format --write .",
 		"verify": "biome check . && vitest run",
 		"seed": "node --conditions=react-server --env-file=.env.local --import tsx scripts/seed.ts",
-		"worker": "node --conditions=react-server --env-file=.env.local --import tsx src/worker/index.ts"
+		"worker": "node --conditions=react-server --env-file=.env.local --import tsx src/worker/index.ts",
+		"perf:seed": "node --conditions=react-server --env-file=.env.local --import tsx scripts/perf-seed.ts",
+		"perf:cleanup": "node --conditions=react-server --env-file=.env.local --import tsx scripts/perf-seed.ts --cleanup",
+		"perf:explain": "node --conditions=react-server --env-file=.env.local --import tsx scripts/perf-explain.ts",
+		"perf:seed:heavy": "node --conditions=react-server --env-file=.env.local --import tsx scripts/perf-seed.ts --heavy",
+		"perf:compare": "node --conditions=react-server --env-file=.env.local --import tsx scripts/perf-compare-dashboard.ts"
 	},
 	"dependencies": {
 		"@better-auth/drizzle-adapter": "^1.7.25",

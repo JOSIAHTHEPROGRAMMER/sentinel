@@ -4,10 +4,12 @@ import { sql } from "drizzle-orm";
 import { closeWorkerDb, workerDb } from "@/lib/db/worker";
 import { createLeaseStore } from "@/lib/monitoring/lease-store";
 import { createAccountPurger } from "@/lib/monitoring/purge-accounts";
+import { createRetentionRunner } from "@/lib/monitoring/retention";
 import { runMonitorCheck } from "@/lib/monitoring/run-monitor-check";
 import { createMonitorScheduler } from "@/lib/monitoring/scheduler";
 
 const POLL_INTERVAL_MS = 15_000;
+const RETENTION_INTERVAL_MS = 60 * 60 * 1000;
 const FORCE_EXIT_MS = 30_000;
 
 // Identifies this process in leases and logs, so two workers can be told apart
@@ -15,6 +17,7 @@ const instanceId = `${hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`;
 
 let stopping = false;
 let timer: ReturnType<typeof setInterval> | undefined;
+let retentionTimer: ReturnType<typeof setInterval> | undefined;
 
 function log(
 	level: "info" | "error",
@@ -97,6 +100,31 @@ const purger = createAccountPurger({
 	},
 });
 
+const retention = createRetentionRunner({
+	runBatch: async () => {
+		const result = await workerDb.execute(
+			sql`SELECT hours_rolled, rows_deleted FROM app.run_check_retention()`,
+		);
+
+		const [row] = result.rows as Array<{
+			hours_rolled: number | string;
+			rows_deleted: number | string;
+		}>;
+
+		return {
+			hoursRolled: Number(row?.hours_rolled ?? 0),
+			rowsDeleted: Number(row?.rows_deleted ?? 0),
+		};
+	},
+	onFinished: (totals) => {
+		log("info", "retention.completed", totals);
+	},
+	onError: (error) => {
+		log("error", "retention.failed", describeError(error));
+	},
+	shouldStop: () => stopping,
+});
+
 async function shutdown(): Promise<void> {
 	if (stopping) {
 		return;
@@ -109,6 +137,10 @@ async function shutdown(): Promise<void> {
 		clearInterval(timer);
 	}
 
+	if (retentionTimer) {
+		clearInterval(retentionTimer);
+	}
+
 	// A hung shutdown must not keep a dead worker alive; the supervisor restarts it
 	setTimeout(() => process.exit(1), FORCE_EXIT_MS).unref();
 
@@ -116,6 +148,7 @@ async function shutdown(): Promise<void> {
 
 	await scheduler.waitForIdle();
 	await purger.waitForIdle();
+	await retention.waitForIdle();
 	await closeWorkerDb();
 
 	log("info", "worker.stopped");
@@ -144,17 +177,25 @@ process.on("uncaughtException", (error) =>
 );
 
 async function main(): Promise<void> {
-	log("info", "worker.started", { pollIntervalMs: POLL_INTERVAL_MS });
+	log("info", "worker.started", {
+		pollIntervalMs: POLL_INTERVAL_MS,
+		retentionIntervalMs: RETENTION_INTERVAL_MS,
+	});
 
 	await scheduler.poll();
 
 	if (!stopping) {
 		void purger.run();
+		void retention.run();
 
 		timer = setInterval(() => {
 			void scheduler.poll();
 			void purger.run();
 		}, POLL_INTERVAL_MS);
+
+		retentionTimer = setInterval(() => {
+			void retention.run();
+		}, RETENTION_INTERVAL_MS);
 	}
 }
 

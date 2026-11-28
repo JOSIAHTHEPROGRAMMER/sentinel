@@ -7,6 +7,7 @@ import {
 	integer,
 	pgPolicy,
 	pgSchema,
+	primaryKey,
 	text,
 	timestamp,
 	uniqueIndex,
@@ -297,6 +298,58 @@ export const monitorLeases = appSchema.table(
 				AND m.enabled = true
 				AND m.deleted_at IS NULL
 			)`,
+		}),
+	],
+);
+
+export const checkRollupsHourly = appSchema.table(
+	"check_rollups_hourly",
+	{
+		monitorId: uuid("monitor_id")
+			.notNull()
+			.references(() => monitors.id, { onDelete: "cascade" }),
+		hourStart: timestamp("hour_start", { withTimezone: true }).notNull(),
+		total: integer("total").notNull(),
+		successful: integer("successful").notNull(),
+		latencySum: integer("latency_sum").notNull(),
+		latencyCount: integer("latency_count").notNull(),
+	},
+	(table) => [
+		primaryKey({
+			name: "check_rollups_hourly_pk",
+			columns: [table.monitorId, table.hourStart],
+		}),
+		check(
+			"check_rollups_hourly_counts",
+			sql`${table.total} >= 0 AND ${table.successful} BETWEEN 0 AND ${table.total} AND ${table.latencyCount} BETWEEN 0 AND ${table.successful} AND ${table.latencySum} >= 0`,
+		),
+		pgPolicy("check_rollups_hourly_owner_read", {
+			for: "select",
+			to: "sentinel_app",
+			using: sql`EXISTS (
+				SELECT 1
+				FROM app.monitors AS m
+				WHERE m.id = monitor_id
+				AND m.owner_id = current_setting('app.user_id', true)
+			)`,
+		}),
+	],
+);
+
+export const rollupState = appSchema.table(
+	"rollup_state",
+	{
+		id: boolean("id").default(true).primaryKey(),
+		rolledThrough: timestamp("rolled_through", {
+			withTimezone: true,
+		}).notNull(),
+	},
+	(table) => [
+		check("rollup_state_singleton", sql`${table.id} = true`),
+		pgPolicy("rollup_state_read", {
+			for: "select",
+			to: "sentinel_app",
+			using: sql`true`,
 		}),
 	],
 );
