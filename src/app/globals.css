@@ -1,49 +1,204 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens. Dark is the default and the fallback. The light set applies
+ * when the system prefers light, unless data-theme="dark" is set, and always
+ * when data-theme="light" is set, so a theme toggle needs no further CSS.
+ */
 :root {
-	--background: #ffffff;
-	--foreground: #171717;
+  color-scheme: dark;
+
+  --bg: #0d0f12;
+  --surface: #13161a;
+  --raised: #1a1e23;
+  --border: #262b32;
+  --border-strong: #363c45;
+
+  --fg: #e8eaed;
+  --fg-muted: #a0a7b1;
+  --fg-subtle: #7b838e;
+
+  --accent: #2f6bdb;
+  --accent-hover: #3d7aeb;
+  --accent-fg: #ffffff;
+  --accent-text: #7fb0ff;
+  --accent-subtle: rgb(47 107 219 / 0.16);
+  --ring: #7fb0ff;
+
+  --success: #3fb97a;
+  --success-subtle: rgb(63 185 122 / 0.14);
+  --danger: #f0605d;
+  --danger-subtle: rgb(240 96 93 / 0.14);
+  --warning: #e5a73a;
+  --warning-subtle: rgb(229 167 58 / 0.14);
+  --neutral: #8a929d;
+  --neutral-subtle: rgb(138 146 157 / 0.14);
+
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 0.45);
+  --scrollbar: rgb(255 255 255 / 0.16);
+  --scrollbar-hover: rgb(255 255 255 / 0.3);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+
+    --bg: #f7f8fa;
+    --surface: #ffffff;
+    --raised: #f1f3f5;
+    --border: #e1e4e8;
+    --border-strong: #c9ced6;
+
+    --fg: #14171a;
+    --fg-muted: #4b535d;
+    --fg-subtle: #666e78;
+
+    --accent: #2459c7;
+    --accent-hover: #1d4fb8;
+    --accent-fg: #ffffff;
+    --accent-text: #1d4fb8;
+    --accent-subtle: rgb(36 89 199 / 0.1);
+    --ring: #2459c7;
+
+    --success: #15803d;
+    --success-subtle: rgb(21 128 61 / 0.1);
+    --danger: #c62828;
+    --danger-subtle: rgb(198 40 40 / 0.1);
+    --warning: #9a5b00;
+    --warning-subtle: rgb(154 91 0 / 0.1);
+    --neutral: #5b636d;
+    --neutral-subtle: rgb(91 99 109 / 0.1);
+
+    --shadow-menu: 0 8px 24px rgb(20 23 26 / 0.14);
+    --scrollbar: rgb(20 23 26 / 0.22);
+    --scrollbar-hover: rgb(20 23 26 / 0.4);
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --raised: #f1f3f5;
+  --border: #e1e4e8;
+  --border-strong: #c9ced6;
+
+  --fg: #14171a;
+  --fg-muted: #4b535d;
+  --fg-subtle: #666e78;
+
+  --accent: #2459c7;
+  --accent-hover: #1d4fb8;
+  --accent-fg: #ffffff;
+  --accent-text: #1d4fb8;
+  --accent-subtle: rgb(36 89 199 / 0.1);
+  --ring: #2459c7;
+
+  --success: #15803d;
+  --success-subtle: rgb(21 128 61 / 0.1);
+  --danger: #c62828;
+  --danger-subtle: rgb(198 40 40 / 0.1);
+  --warning: #9a5b00;
+  --warning-subtle: rgb(154 91 0 / 0.1);
+  --neutral: #5b636d;
+  --neutral-subtle: rgb(91 99 109 / 0.1);
+
+  --shadow-menu: 0 8px 24px rgb(20 23 26 / 0.14);
+  --scrollbar: rgb(20 23 26 / 0.22);
+  --scrollbar-hover: rgb(20 23 26 / 0.4);
 }
 
 @theme inline {
-	--color-background: var(--background);
-	--color-foreground: var(--foreground);
-	--font-sans: var(--font-geist-sans);
-	--font-mono: var(--font-geist-mono);
-}
+  --font-sans:
+    var(--font-plex-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-mono:
+    var(--font-plex-mono), ui-monospace, "Cascadia Mono", Consolas, monospace;
 
-@media (prefers-color-scheme: dark) {
-	:root {
-		--background: #0a0a0a;
-		--foreground: #ededed;
-	}
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-text: var(--accent-text);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-neutral: var(--neutral);
+  --color-neutral-subtle: var(--neutral-subtle);
+
+  --radius-control: 6px;
+  --radius-panel: 8px;
+
+  --text-ui: 0.8125rem;
+  --text-ui--line-height: 1.25rem;
 }
 
 body {
-	background: var(--background);
-	color: var(--foreground);
-	font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.875rem;
+  line-height: 1.5rem;
 }
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--accent-subtle);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion must override component styles */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion must override component styles */
+    animation-iteration-count: 1 !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion must override component styles */
+    transition-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion must override component styles */
+    scroll-behavior: auto !important;
+  }
+}
+
 .table-scroll {
-	scrollbar-width: thin;
-	scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
 }
 
 /* WebKit fallback for older browsers */
 .table-scroll::-webkit-scrollbar {
-	width: 8px;
-	height: 8px;
+  width: 8px;
+  height: 8px;
 }
 .table-scroll::-webkit-scrollbar-track {
-	background: transparent;
+  background: transparent;
 }
 .table-scroll::-webkit-scrollbar-thumb {
-	background: rgba(255, 255, 255, 0.15);
-	border-radius: 9999px;
+  background: var(--scrollbar);
+  border-radius: 9999px;
 }
 .table-scroll::-webkit-scrollbar-thumb:hover {
-	background: rgba(255, 255, 255, 0.3);
+  background: var(--scrollbar-hover);
 }
 .table-scroll::-webkit-scrollbar-corner {
-	background: transparent;
+  background: transparent;
 }

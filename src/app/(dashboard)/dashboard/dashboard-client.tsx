@@ -1,401 +1,415 @@
 "use client";
 
+import {
+  Activity,
+  CircleCheck,
+  CircleMinus,
+  CircleX,
+  Plus,
+  TriangleAlert,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { ResponseTimeChart } from "@/components/charts/response-time-chart";
+import { Button, buttonStyles } from "@/components/ui/button";
+import { type Column, DataTable } from "@/components/ui/data-table";
+import { EmptyState } from "@/components/ui/empty-state";
 import { LocalDate } from "@/components/ui/local-date";
+import { MonitorStatusBadge } from "@/components/ui/monitor-status-badge";
+import { PageHeader } from "@/components/ui/page-header";
+import { Panel } from "@/components/ui/panel";
+import { cn } from "@/lib/cn";
 import type { ChartBucket } from "@/lib/data/analytics-buckets";
 import {
-	ANALYTICS_RANGES,
-	type AnalyticsRange,
-	type AnalyticsSummary,
+  ANALYTICS_RANGES,
+  type AnalyticsRange,
+  type AnalyticsSummary,
 } from "@/lib/data/analytics-shared";
-import { isMonitorStale } from "@/lib/data/staleness";
+import type { MonitorRow } from "@/lib/data/monitor-rows";
+import type { RecentIncident } from "@/lib/data/recent-incidents";
 import { formatDurationMs } from "@/lib/format-duration";
-
-type Monitor = {
-	id: string;
-	name: string;
-	url: string;
-	enabled: boolean;
-	intervalSeconds: number;
-	timeoutMs: number;
-	createdAt: string;
-	updatedAt: string;
-};
+import { formatInterval } from "@/lib/format-interval";
 
 type DashboardClientProps = {
-	monitors: Monitor[];
-	analytics: AnalyticsSummary;
-	lastChecks: Record<string, string>;
-	trend: ChartBucket[];
-	now: number;
+  rows: MonitorRow[];
+  analytics: AnalyticsSummary;
+  trend: ChartBucket[];
+  openIncidents: RecentIncident[];
+  resolvedIncidents: RecentIncident[];
+  now: number;
 };
 
 const RANGE_LABELS: Record<AnalyticsRange, string> = {
-	"24h": "Last 24 hours",
-	"7d": "Last 7 days",
-	"30d": "Last 30 days",
+  "24h": "Last 24 hours",
+  "7d": "Last 7 days",
+  "30d": "Last 30 days",
 };
 
-function formatInterval(seconds: number): string {
-	if (seconds % 3600 === 0) {
-		return `${seconds / 3600} hour${seconds / 3600 === 1 ? "" : "s"}`;
-	}
+type Summary = {
+  tone: "success" | "danger" | "warning" | "neutral";
+  text: string;
+};
 
-	if (seconds % 60 === 0) {
-		return `${seconds / 60} min`;
-	}
+function summarize(rows: MonitorRow[]): Summary {
+  const count = (status: MonitorRow["status"]) =>
+    rows.filter((row) => row.status === status).length;
+  const down = count("down");
+  const stale = count("stale");
+  const waiting = count("no-data");
+  const enabled = rows.filter((row) => row.enabled).length;
 
-	return `${seconds} sec`;
+  if (down > 0) {
+    return {
+      tone: "danger",
+      text: `${down} of ${rows.length} ${rows.length === 1 ? "monitor is" : "monitors are"} down`,
+    };
+  }
+
+  if (stale > 0) {
+    return {
+      tone: "warning",
+      text: `${stale} ${stale === 1 ? "monitor has" : "monitors have"} not reported a check recently. If this persists, check that the monitoring worker is running.`,
+    };
+  }
+
+  if (enabled === 0) {
+    return { tone: "neutral", text: "All monitors are paused" };
+  }
+
+  if (waiting > 0) {
+    return {
+      tone: "neutral",
+      text: `${waiting} ${waiting === 1 ? "monitor is" : "monitors are"} waiting for the first check`,
+    };
+  }
+
+  return {
+    tone: "success",
+    text: `All ${enabled} active ${enabled === 1 ? "monitor is" : "monitors are"} operational`,
+  };
 }
 
-function SummaryCard({
-	label,
-	value,
-	description,
+const summaryStyles = {
+  success: { icon: CircleCheck, className: "text-success" },
+  danger: { icon: CircleX, className: "text-danger" },
+  warning: { icon: TriangleAlert, className: "text-warning" },
+  neutral: { icon: CircleMinus, className: "text-neutral" },
+};
+
+function Figure({
+  label,
+  value,
+  detail,
 }: {
-	label: string;
-	value: string | number;
-	description: string;
+  label: string;
+  value: string;
+  detail: string;
 }) {
-	return (
-		<article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-			<p className="text-sm text-slate-400">{label}</p>
-			<p className="mt-3 text-3xl font-semibold tracking-tight text-white">
-				{value}
-			</p>
-			<p className="mt-2 text-xs text-slate-500">{description}</p>
-		</article>
-	);
+  return (
+    <div>
+      <p className="text-ui text-fg-muted">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tabular-nums text-fg">
+        {value}
+      </p>
+      <p className="mt-1 text-ui text-fg-subtle">{detail}</p>
+    </div>
+  );
+}
+
+function RangeSelector({
+  value,
+  onChange,
+}: {
+  value: AnalyticsRange;
+  onChange: (range: AnalyticsRange) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Time range"
+      className="inline-flex rounded-control border border-border p-0.5"
+    >
+      {ANALYTICS_RANGES.map((range) => (
+        <button
+          key={range}
+          type="button"
+          aria-pressed={value === range}
+          onClick={() => onChange(range)}
+          className={cn(
+            "h-7 cursor-pointer rounded-control px-2.5 text-ui font-medium transition-colors",
+            value === range
+              ? "bg-accent-subtle text-fg"
+              : "text-fg-muted hover:text-fg",
+          )}
+        >
+          {range}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export default function DashboardClient({
-	monitors,
-	analytics,
-	lastChecks,
-	trend,
-	now,
+  rows,
+  analytics,
+  trend,
+  openIncidents,
+  resolvedIncidents,
+  now,
 }: DashboardClientProps) {
-	const router = useRouter();
-	const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
-	function refresh() {
-		startTransition(() => {
-			router.refresh();
-		});
-	}
+  function refresh() {
+    startTransition(() => {
+      router.refresh();
+    });
+  }
 
-	function changeRange(range: AnalyticsRange) {
-		if (range === analytics.range) {
-			return;
-		}
+  function changeRange(range: AnalyticsRange) {
+    if (range === analytics.range) {
+      return;
+    }
 
-		startTransition(() => {
-			router.push(`/dashboard?range=${range}`, { scroll: false });
-		});
-	}
+    startTransition(() => {
+      router.push(`/dashboard?range=${range}`, { scroll: false });
+    });
+  }
 
-	const enabledCount = monitors.filter((monitor) => monitor.enabled).length;
-	const disabledCount = monitors.length - enabledCount;
+  const summary = summarize(rows);
+  const SummaryIcon = summaryStyles[summary.tone].icon;
+  const hasChecks = analytics.totalChecks > 0;
 
-	const averageInterval =
-		monitors.length > 0
-			? Math.round(
-					monitors.reduce(
-						(total, monitor) => total + monitor.intervalSeconds,
-						0,
-					) / monitors.length,
-				)
-			: null;
+  const columns: Column<MonitorRow>[] = [
+    {
+      key: "status",
+      header: "Status",
+      cell: (row) => <MonitorStatusBadge status={row.status} />,
+    },
+    {
+      key: "monitor",
+      header: "Monitor",
+      cell: (row) => (
+        <div className="min-w-0 max-w-sm">
+          <Link
+            href={`/monitors/${row.id}`}
+            className="font-medium text-fg hover:text-accent-text hover:underline"
+          >
+            {row.name}
+          </Link>
+          <p className="truncate font-mono text-xs text-fg-subtle">{row.url}</p>
+        </div>
+      ),
+    },
+    {
+      key: "uptime",
+      header: "Uptime (24h)",
+      align: "right",
+      cell: (row) =>
+        row.uptimePercentage === null
+          ? "N/A"
+          : `${row.uptimePercentage.toFixed(2)}%`,
+    },
+    {
+      key: "last",
+      header: "Last check",
+      align: "right",
+      cell: (row) =>
+        row.lastCheckedAt
+          ? `${formatDurationMs(now - new Date(row.lastCheckedAt).getTime())} ago`
+          : "Never",
+    },
+    {
+      key: "interval",
+      header: "Interval",
+      align: "right",
+      cell: (row) => formatInterval(row.intervalSeconds),
+    },
+  ];
 
-	const hasChecks = analytics.totalChecks > 0;
+  return (
+    <>
+      <PageHeader
+        title="Overview"
+        actions={
+          <>
+            <Button variant="secondary" onClick={refresh} loading={isPending}>
+              Refresh
+            </Button>
+            <Link
+              href="/monitors/new"
+              className={buttonStyles({ variant: "primary" })}
+            >
+              <Plus aria-hidden="true" className="size-4" />
+              Add monitor
+            </Link>
+          </>
+        }
+      />
 
-	const staleMonitors = monitors.filter((monitor) =>
-		isMonitorStale(
-			{ ...monitor, lastCheckedAt: lastChecks[monitor.id] ?? null },
-			now,
-		),
-	);
+      {rows.length > 0 && (
+        <section
+          aria-label="Current status"
+          className="rounded-panel border border-border bg-surface"
+        >
+          <div role="status" className="flex items-start gap-3 px-4 py-3">
+            <SummaryIcon
+              aria-hidden="true"
+              className={cn(
+                "mt-0.5 size-5 shrink-0",
+                summaryStyles[summary.tone].className,
+              )}
+            />
+            <p className="text-sm font-medium text-fg">{summary.text}</p>
+          </div>
 
-	return (
-		<div className="space-y-8">
-			<section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-				<div>
-					<p className="text-sm font-medium text-cyan-300">YOUR WORKSPACE</p>
-					<h1 className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-						Monitoring overview
-					</h1>
-					<p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-						Review how your endpoints are performing and manage their
-						configuration from one place.
-					</p>
-				</div>
+          {openIncidents.length > 0 && (
+            <ul className="divide-y divide-border border-t border-border">
+              {openIncidents.map((incident) => (
+                <li key={incident.id}>
+                  <Link
+                    href={`/incidents/${incident.id}`}
+                    className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2.5 hover:bg-raised"
+                  >
+                    <span className="min-w-0">
+                      <span className="font-medium text-fg">
+                        {incident.monitorName}
+                      </span>
+                      <span className="ml-2 text-fg-muted">
+                        {incident.reason}
+                      </span>
+                    </span>
+                    <span className="text-ui text-fg-subtle">
+                      Started <LocalDate value={incident.startedAt} />
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
-				<button
-					type="button"
-					onClick={refresh}
-					disabled={isPending}
-					className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/5 disabled:cursor-wait disabled:opacity-50"
-				>
-					{isPending ? "Refreshing..." : "Refresh data"}
-				</button>
-			</section>
+      <Panel
+        title="Performance"
+        description={RANGE_LABELS[analytics.range]}
+        actions={
+          <RangeSelector value={analytics.range} onChange={changeRange} />
+        }
+        className={cn("transition-opacity", isPending && "opacity-60")}
+      >
+        <div className="grid gap-6 sm:grid-cols-3">
+          <Figure
+            label="Uptime"
+            value={
+              analytics.uptimePercentage === null
+                ? "N/A"
+                : `${analytics.uptimePercentage.toFixed(2)}%`
+            }
+            detail={
+              hasChecks
+                ? `${analytics.successfulChecks} of ${analytics.totalChecks} checks succeeded`
+                : "No checks in this period"
+            }
+          />
+          <Figure
+            label="Average response time"
+            value={
+              analytics.averageResponseTimeMs === null
+                ? "N/A"
+                : `${analytics.averageResponseTimeMs} ms`
+            }
+            detail="Successful checks only"
+          />
+          <Figure
+            label="Checks"
+            value={analytics.totalChecks.toLocaleString("en-US")}
+            detail={`${analytics.failedChecks} failed. ${analytics.incidentsStarted} incidents started, ${analytics.incidentsResolved} resolved`}
+          />
+        </div>
 
-			{staleMonitors.length > 0 && (
-				<section
-					role="alert"
-					className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4"
-				>
-					<p className="font-medium text-amber-300">
-						{staleMonitors.length}{" "}
-						{staleMonitors.length === 1 ? "monitor has" : "monitors have"} not
-						reported a check recently
-					</p>
-					<p className="mt-1 text-sm text-slate-400">
-						{staleMonitors.map((monitor) => monitor.name).join(", ")}. If this
-						persists, check that the monitoring worker is running.
-					</p>
-				</section>
-			)}
+        <div className="mt-6 border-t border-border pt-4">
+          {hasChecks ? (
+            <ResponseTimeChart
+              buckets={trend}
+              showTime={analytics.range !== "30d"}
+              label="Average response time per interval across all monitors"
+            />
+          ) : (
+            <p className="text-sm text-fg-muted">
+              A chart will appear once checks are recorded in this period.
+            </p>
+          )}
+        </div>
 
-			<section
-				aria-label="Performance"
-				className={`space-y-4 transition-opacity ${isPending ? "opacity-60" : ""}`}
-			>
-				<div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-					<div>
-						<h2 className="text-lg font-semibold text-white">Performance</h2>
-						<p className="mt-1 text-sm text-slate-400">
-							{RANGE_LABELS[analytics.range]}
-						</p>
-					</div>
+        <p className="mt-4 text-ui text-fg-subtle">
+          Uptime is successful checks over all checks. Timeouts and errors count
+          as down. An interval is marked unusually slow when it is above twice
+          the median and at least 500 ms.
+        </p>
+      </Panel>
 
-					<fieldset className="m-0 inline-flex min-w-0 self-start rounded-lg border border-white/10 p-1">
-						<legend className="sr-only">Time range</legend>
-						{ANALYTICS_RANGES.map((range) => (
-							<button
-								key={range}
-								type="button"
-								aria-pressed={analytics.range === range}
-								onClick={() => changeRange(range)}
-								className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-									analytics.range === range
-										? "bg-cyan-400 text-slate-950"
-										: "text-slate-300 hover:bg-white/5"
-								}`}
-							>
-								{range}
-							</button>
-						))}
-					</fieldset>
-				</div>
+      <Panel
+        title="Monitors"
+        description={`${rows.length} ${rows.length === 1 ? "monitor" : "monitors"}, problems first`}
+        flush
+      >
+        {rows.length === 0 ? (
+          <EmptyState
+            icon={Activity}
+            title="No monitors yet"
+            description="Add an endpoint to start recording checks."
+            action={
+              <Link
+                href="/monitors/new"
+                className={buttonStyles({ variant: "primary" })}
+              >
+                Create your first monitor
+              </Link>
+            }
+          />
+        ) : (
+          <DataTable
+            caption="Monitors and their current status"
+            columns={columns}
+            rows={rows}
+            rowKey={(row) => row.id}
+          />
+        )}
+      </Panel>
 
-				<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-					<SummaryCard
-						label="Uptime"
-						value={
-							analytics.uptimePercentage === null
-								? "N/A"
-								: `${analytics.uptimePercentage.toFixed(2)}%`
-						}
-						description={
-							hasChecks
-								? `${analytics.successfulChecks} of ${analytics.totalChecks} checks succeeded`
-								: "No checks recorded in this period"
-						}
-					/>
-					<SummaryCard
-						label="Average response time"
-						value={
-							analytics.averageResponseTimeMs === null
-								? "N/A"
-								: `${analytics.averageResponseTimeMs} ms`
-						}
-						description="Successful checks only"
-					/>
-					<SummaryCard
-						label="Checks"
-						value={analytics.totalChecks}
-						description={`${analytics.failedChecks} failed in this period`}
-					/>
-					<SummaryCard
-						label="Open incidents"
-						value={analytics.openIncidents}
-						description={`${analytics.incidentsStarted} started, ${analytics.incidentsResolved} resolved in this period`}
-					/>
-				</div>
-
-				<div className="rounded-2xl border border-white/10 bg-slate-900/50 p-5">
-					<h3 className="text-sm font-medium text-white">
-						Response time across all monitors
-					</h3>
-					<p className="mt-1 mb-4 text-xs leading-5 text-slate-500">
-						Average of successful checks per interval, oldest to newest. Color
-						shows how many checks in that interval passed, and a dot marks an
-						interval that was unusually slow.
-					</p>
-
-					{hasChecks ? (
-						<ResponseTimeChart
-							buckets={trend}
-							showTime={analytics.range !== "30d"}
-							label="Average response time per interval across all monitors"
-						/>
-					) : (
-						<p className="rounded-xl border border-white/10 p-6 text-sm text-slate-400">
-							A chart will appear once checks are recorded in this period.
-						</p>
-					)}
-				</div>
-			</section>
-
-			<section
-				aria-label="Monitor summary"
-				className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
-			>
-				<SummaryCard
-					label="Total monitors"
-					value={monitors.length}
-					description="Your configured endpoints"
-				/>
-				<SummaryCard
-					label="Enabled"
-					value={enabledCount}
-					description="Configured to run checks"
-				/>
-				<SummaryCard
-					label="Disabled"
-					value={disabledCount}
-					description="Checks are switched off"
-				/>
-				<SummaryCard
-					label="Average interval"
-					value={
-						averageInterval === null ? "N/A" : formatInterval(averageInterval)
-					}
-					description="Across all configured monitors"
-				/>
-			</section>
-
-			<section className="overflow-hidden rounded-2xl border border-white/10 bg-slate-900/50">
-				<div className="flex flex-col gap-2 border-b border-white/10 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-					<div>
-						<h2 className="text-lg font-semibold text-white">Your monitors</h2>
-						<p className="mt-1 text-sm text-slate-400">
-							The endpoints configured in your workspace.
-						</p>
-					</div>
-					<span className="text-sm text-slate-500">
-						{monitors.length} {monitors.length === 1 ? "monitor" : "monitors"}
-					</span>
-				</div>
-
-				{monitors.length === 0 ? (
-					<div className="px-6 py-14 text-center">
-						<div className="mx-auto flex size-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-xl text-cyan-300">
-							◎
-						</div>
-						<h3 className="mt-4 font-medium text-white">No monitors yet</h3>
-						<p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-400">
-							Add your first endpoint to start building your monitoring
-							workspace.
-						</p>
-						<Link
-							href="/monitors/new"
-							className="mt-5 inline-flex rounded-lg bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-cyan-300"
-						>
-							Create your first monitor
-						</Link>
-					</div>
-				) : (
-					<div className="overflow-x-auto">
-						<table className="w-full min-w-180 text-left text-sm">
-							<thead className="bg-white/2 text-xs uppercase tracking-wide text-slate-500">
-								<tr>
-									<th scope="col" className="px-6 py-4 font-medium">
-										Monitor
-									</th>
-									<th scope="col" className="px-6 py-4 font-medium">
-										Interval
-									</th>
-									<th scope="col" className="px-6 py-4 font-medium">
-										Timeout
-									</th>
-									<th scope="col" className="px-6 py-4 font-medium">
-										Created
-									</th>
-									<th scope="col" className="px-6 py-4 font-medium">
-										Last check
-									</th>
-									<th scope="col" className="px-6 py-4 font-medium">
-										Configuration
-									</th>
-								</tr>
-							</thead>
-							<tbody className="divide-y divide-white/5">
-								{monitors.map((monitor) => (
-									<tr
-										key={monitor.id}
-										className="transition hover:bg-white/2.5"
-									>
-										<td className="px-6 py-4">
-											<div className="max-w-sm">
-												<p className="font-medium text-slate-100">
-													{monitor.name}
-												</p>
-												<p className="mt-1 truncate text-xs text-slate-500">
-													{monitor.url}
-												</p>
-											</div>
-										</td>
-										<td className="whitespace-nowrap px-6 py-4 text-slate-300">
-											{formatInterval(monitor.intervalSeconds)}
-										</td>
-										<td className="whitespace-nowrap px-6 py-4 text-slate-300">
-											{formatInterval(monitor.timeoutMs / 1000)}
-										</td>
-										<td className="whitespace-nowrap px-6 py-4 text-slate-400">
-											<LocalDate value={monitor.createdAt} />
-										</td>
-										<td className="whitespace-nowrap px-6 py-4 text-slate-400">
-											{lastChecks[monitor.id]
-												? `${formatDurationMs(now - new Date(lastChecks[monitor.id]).getTime())} ago`
-												: "Never"}
-										</td>
-										<td className="px-6 py-4">
-											<span
-												className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ${
-													monitor.enabled
-														? "bg-emerald-400/10 text-emerald-300"
-														: "bg-slate-700/60 text-slate-300"
-												}`}
-											>
-												<span
-													aria-hidden="true"
-													className={`size-1.5 rounded-full ${
-														monitor.enabled ? "bg-emerald-300" : "bg-slate-400"
-													}`}
-												/>
-												{monitor.enabled ? "Enabled" : "Disabled"}
-											</span>
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
-				)}
-			</section>
-
-			<p className="text-xs leading-5 text-slate-500">
-				Uptime counts successful checks as up. Timeouts and failed checks count
-				as down. Response time is averaged over successful checks only. An
-				interval is marked unusually slow when it is above twice the median and
-				at least 500 ms. Open incidents is the current count and does not depend
-				on the selected period.
-			</p>
-		</div>
-	);
+      {resolvedIncidents.length > 0 && (
+        <Panel title="Recently resolved" flush>
+          <ul className="divide-y divide-border">
+            {resolvedIncidents.map((incident) => (
+              <li key={incident.id}>
+                <Link
+                  href={`/incidents/${incident.id}`}
+                  className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2.5 hover:bg-raised"
+                >
+                  <span className="min-w-0">
+                    <span className="font-medium text-fg">
+                      {incident.monitorName}
+                    </span>
+                    <span className="ml-2 text-fg-muted">
+                      {incident.reason}
+                    </span>
+                  </span>
+                  <span className="text-ui text-fg-subtle">
+                    <LocalDate value={incident.startedAt} />
+                    {incident.resolvedAt &&
+                      `, lasted ${formatDurationMs(
+                        new Date(incident.resolvedAt).getTime() -
+                          new Date(incident.startedAt).getTime(),
+                      )}`}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
+    </>
+  );
 }

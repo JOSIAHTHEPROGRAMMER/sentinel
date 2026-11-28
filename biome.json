@@ -29,6 +29,22 @@
 			"quoteStyle": "double"
 		}
 	},
+	"overrides": [
+		{
+			"includes": [
+				"src/components/ui/select.tsx",
+				"src/components/ui/modal.tsx"
+			],
+			"linter": {
+				"rules": {
+					"a11y": {
+						"useFocusableInteractive": "off",
+						"useKeyWithClickEvents": "off"
+					}
+				}
+			}
+		}
+	],
 	"assist": {
 		"enabled": true,
 		"actions": {

@@ -1,24 +1,59 @@
 "use client";
 
+import {
+	Activity,
+	Folder,
+	LayoutDashboard,
+	LogOut,
+	Menu,
+	Settings,
+	ShieldCheck,
+	TriangleAlert,
+	X,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth/client";
+import { cn } from "@/lib/cn";
 
 const navigation = [
-	{ label: "Overview", href: "/dashboard", icon: "▣" },
-	{ label: "Monitors", href: "/monitors", icon: "◎" },
-	{ label: "Projects", href: "/projects", icon: "▦" },
-	{ label: "Incidents", href: "/incidents", icon: "△" },
-	{ label: "Settings", href: "/settings", icon: "⚙" },
+	{
+		label: "Monitoring",
+		items: [
+			{ label: "Overview", href: "/dashboard", icon: LayoutDashboard },
+			{ label: "Monitors", href: "/monitors", icon: Activity },
+			{ label: "Projects", href: "/projects", icon: Folder },
+			{ label: "Incidents", href: "/incidents", icon: TriangleAlert },
+		],
+	},
+	{
+		label: "Account",
+		items: [{ label: "Settings", href: "/settings", icon: Settings }],
+	},
 ];
 
 type DashboardShellProps = {
-	children: React.ReactNode;
+	children: ReactNode;
 	userName: string;
 	userEmail: string;
-	banner?: React.ReactNode;
+	banner?: ReactNode;
 };
+
+function Logo() {
+	return (
+		<Link
+			href="/dashboard"
+			className="flex items-center gap-2.5 rounded-control"
+		>
+			<span className="flex size-7 items-center justify-center rounded-control bg-accent text-accent-fg">
+				<ShieldCheck aria-hidden="true" className="size-4" />
+			</span>
+			<span className="text-sm font-semibold text-fg">Sentinel</span>
+		</Link>
+	);
+}
 
 export function DashboardShell({
 	children,
@@ -30,6 +65,9 @@ export function DashboardShell({
 	const router = useRouter();
 	const [signingOut, setSigningOut] = useState(false);
 	const [error, setError] = useState("");
+	// The menu is open only on the page it was opened from, so navigating closes it
+	const [openedAt, setOpenedAt] = useState<string | null>(null);
+	const menuOpen = openedAt === pathname;
 
 	async function handleSignOut() {
 		setSigningOut(true);
@@ -52,107 +90,125 @@ export function DashboardShell({
 		}
 	}
 
+	const initial = userName.trim().charAt(0).toUpperCase() || "?";
+
 	return (
-		<div className="min-h-screen bg-slate-950 text-slate-100 md:flex">
-			<aside className="flex w-full shrink-0 flex-col border-b border-white/10 bg-slate-950 md:min-h-screen md:w-64 md:border-r md:border-b-0">
-				<div className="flex h-16 items-center gap-3 border-b border-white/10 px-6">
-					<div className="flex size-9 items-center justify-center rounded-xl bg-cyan-400 font-bold text-slate-950">
-						S
-					</div>
-					<div>
-						<p className="font-semibold tracking-wide">Sentinel</p>
-						<p className="text-xs text-slate-500">API Monitoring</p>
-					</div>
+		<div className="min-h-screen bg-bg text-fg md:flex">
+			<div className="flex h-14 items-center justify-between border-b border-border bg-surface px-4 md:hidden">
+				<Logo />
+				<Button
+					variant="quiet"
+					size="sm"
+					className="w-8 px-0"
+					aria-label={menuOpen ? "Close menu" : "Open menu"}
+					aria-expanded={menuOpen}
+					aria-controls="app-sidebar"
+					onClick={() => setOpenedAt(menuOpen ? null : pathname)}
+				>
+					{menuOpen ? (
+						<X aria-hidden="true" className="size-4" />
+					) : (
+						<Menu aria-hidden="true" className="size-4" />
+					)}
+				</Button>
+			</div>
+
+			<aside
+				id="app-sidebar"
+				className={cn(
+					"w-full shrink-0 flex-col border-b border-border bg-surface md:sticky md:top-0 md:flex md:h-screen md:w-58 md:border-r md:border-b-0",
+					menuOpen ? "flex" : "hidden",
+				)}
+			>
+				<div className="hidden h-14 items-center px-4 md:flex">
+					<Logo />
 				</div>
 
 				<nav
 					aria-label="Main navigation"
-					className="flex gap-2 overflow-x-auto p-4 md:flex-1 md:flex-col"
+					className="flex-1 space-y-5 overflow-y-auto px-3 py-3"
 				>
-					{navigation.map((item) => {
-						const active =
-							item.href !== null &&
-							(pathname === item.href ||
-								(item.href !== "/dashboard" &&
-									pathname.startsWith(`${item.href}/`)));
+					{navigation.map((group) => (
+						<div key={group.label}>
+							<p className="px-2 pb-1.5 text-xs font-medium text-fg-subtle">
+								{group.label}
+							</p>
+							<ul className="space-y-0.5">
+								{group.items.map((item) => {
+									const active =
+										pathname === item.href ||
+										(item.href !== "/dashboard" &&
+											pathname.startsWith(`${item.href}/`));
+									const Icon = item.icon;
 
-						const className = `flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium ${
-							active
-								? "bg-cyan-400/10 text-cyan-300 ring-1 ring-cyan-400/20"
-								: "text-slate-400 hover:bg-white/5 hover:text-slate-200"
-						}`;
-
-						return item.href ? (
-							<Link
-								key={item.label}
-								href={item.href}
-								aria-current={active ? "page" : undefined}
-								className={className}
-							>
-								<span aria-hidden="true" className="text-lg">
-									{item.icon}
-								</span>
-								{item.label}
-							</Link>
-						) : (
-							<div
-								key={item.label}
-								aria-disabled="true"
-								title="Available in a later phase"
-								className="flex shrink-0 cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-slate-600"
-							>
-								<span aria-hidden="true" className="text-lg">
-									{item.icon}
-								</span>
-								<span>{item.label}</span>
-								<span className="ml-auto text-xs">Soon</span>
-							</div>
-						);
-					})}
+									return (
+										<li key={item.href}>
+											<Link
+												href={item.href}
+												aria-current={active ? "page" : undefined}
+												className={cn(
+													"flex h-8 items-center gap-2.5 rounded-control px-2 text-sm font-medium transition-colors",
+													active
+														? "bg-accent-subtle text-fg"
+														: "text-fg-muted hover:bg-raised hover:text-fg",
+												)}
+											>
+												<Icon
+													aria-hidden="true"
+													className={cn(
+														"size-4",
+														active ? "text-accent-text" : "text-fg-subtle",
+													)}
+												/>
+												{item.label}
+											</Link>
+										</li>
+									);
+								})}
+							</ul>
+						</div>
+					))}
 				</nav>
 
-				<div className="hidden border-t border-white/10 p-5 md:block">
-					<p className="text-xs leading-5 text-slate-500">
-						Monitor your endpoints. Detect issues. Keep your services reliable.
-					</p>
+				<div className="flex items-center gap-3 border-t border-border p-3">
+					<span
+						aria-hidden="true"
+						className="flex size-8 shrink-0 items-center justify-center rounded-control bg-raised text-ui font-semibold text-fg-muted"
+					>
+						{initial}
+					</span>
+					<div className="min-w-0 flex-1">
+						<p className="truncate text-ui font-medium text-fg">{userName}</p>
+						<p className="truncate text-xs text-fg-subtle">{userEmail}</p>
+					</div>
+					<Button
+						variant="quiet"
+						size="sm"
+						className="w-8 px-0"
+						aria-label="Sign out"
+						title="Sign out"
+						onClick={handleSignOut}
+						loading={signingOut}
+					>
+						{!signingOut && <LogOut aria-hidden="true" className="size-4" />}
+					</Button>
 				</div>
 			</aside>
 
 			<div className="min-w-0 flex-1">
-				<header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-3 sm:px-8">
-					<p className="text-sm font-medium">Monitoring workspace</p>
-
-					<div className="flex min-w-0 items-center gap-3">
-						<div className="hidden min-w-0 text-right sm:block">
-							<p className="truncate text-sm font-medium text-slate-200">
-								{userName}
-							</p>
-							<p className="max-w-52 truncate text-xs text-slate-500">
-								{userEmail}
-							</p>
-						</div>
-
-						<button
-							type="button"
-							onClick={handleSignOut}
-							disabled={signingOut}
-							className="cursor-pointer rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
-						>
-							{signingOut ? "Signing out..." : "Sign out"}
-						</button>
-					</div>
-				</header>
 				{banner}
 				{error && (
 					<p
 						role="alert"
-						className="border-b border-red-500/20 bg-red-500/5 px-5 py-3 text-sm text-red-300 sm:px-8"
+						className="border-b border-border bg-danger-subtle px-4 py-2.5 text-sm text-danger sm:px-6"
 					>
 						{error}
 					</p>
 				)}
 
-				<main className="mx-auto w-full max-w-7xl p-5 sm:p-8">{children}</main>
+				<main className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
+					{children}
+				</main>
 			</div>
 		</div>
 	);

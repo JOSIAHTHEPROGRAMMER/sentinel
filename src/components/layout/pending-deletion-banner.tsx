@@ -1,7 +1,9 @@
 "use client";
 
+import { TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { LocalDate } from "@/components/ui/local-date";
 
 type PendingDeletionBannerProps = {
@@ -45,26 +47,33 @@ export function PendingDeletionBanner({
 	return (
 		<section
 			role="alert"
-			className="border-b border-amber-400/20 bg-amber-400/5 px-5 py-3 sm:px-8"
+			className="border-b border-border bg-warning-subtle px-4 py-3 sm:px-6"
 		>
 			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<p className="text-sm text-amber-200">
-					Your account is scheduled for deletion on{" "}
-					<LocalDate value={purgeAfter} />. All your monitors, history and
-					settings will be permanently removed then.
+				<p className="flex items-start gap-2.5 text-sm text-fg">
+					<TriangleAlert
+						aria-hidden="true"
+						className="mt-0.5 size-4 shrink-0 text-warning"
+					/>
+					<span>
+						Your account is scheduled for deletion on{" "}
+						<LocalDate value={purgeAfter} />. All your monitors, history and
+						settings will be permanently removed then.
+					</span>
 				</p>
 
-				<button
-					type="button"
+				<Button
+					variant="secondary"
+					size="sm"
 					onClick={handleCancel}
-					disabled={cancelling}
-					className="cursor-pointer self-start rounded-lg border border-amber-400/30 px-3 py-2 text-xs font-medium text-amber-100 transition hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-50 sm:self-center"
+					loading={cancelling}
+					className="self-start sm:self-center"
 				>
-					{cancelling ? "Cancelling..." : "Cancel deletion"}
-				</button>
+					Cancel deletion
+				</Button>
 			</div>
 
-			{error && <p className="mt-2 text-xs text-red-300">{error}</p>}
+			{error && <p className="mt-2 text-ui text-danger">{error}</p>}
 		</section>
 	);
 }

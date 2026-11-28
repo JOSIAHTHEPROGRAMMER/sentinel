@@ -1,84 +1,79 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getSession } from "@/lib/auth/session";
+import { getAnalyticsSummary, getDashboardTrend } from "@/lib/data/analytics";
 import {
-	getAnalyticsSummary,
-	getDashboardTrend,
-	getLastCheckTimes,
-} from "@/lib/data/analytics";
-import {
-	type AnalyticsRange,
-	parseAnalyticsRange,
+  type AnalyticsRange,
+  parseAnalyticsRange,
 } from "@/lib/data/analytics-shared";
+import { getMonitorHealth } from "@/lib/data/monitor-health";
+import { buildMonitorRows } from "@/lib/data/monitor-rows";
 import { getMonitorsForUser } from "@/lib/data/monitors";
+import { getRecentIncidents } from "@/lib/data/recent-incidents";
 import DashboardClient from "./dashboard-client";
 
 type DashboardPageProps = {
-	searchParams: Promise<{ range?: string | string[] }>;
+  searchParams: Promise<{ range?: string | string[] }>;
 };
 
 async function DashboardContent({
-	userId,
-	range,
+  userId,
+  range,
 }: {
-	userId: string;
-	range: AnalyticsRange;
+  userId: string;
+  range: AnalyticsRange;
 }) {
-	const [monitors, analytics, lastChecks, trend] = await Promise.all([
-		getMonitorsForUser(userId),
-		getAnalyticsSummary(userId, range),
-		getLastCheckTimes(userId),
-		getDashboardTrend(userId, range),
-	]);
+  const now = Date.now();
 
-	return (
-		<DashboardClient
-			monitors={monitors}
-			analytics={analytics}
-			lastChecks={lastChecks}
-			trend={trend}
-			now={Date.now()}
-		/>
-	);
+  const [monitors, analytics, health, trend, incidents] = await Promise.all([
+    getMonitorsForUser(userId),
+    getAnalyticsSummary(userId, range),
+    getMonitorHealth(userId, now),
+    getDashboardTrend(userId, range),
+    getRecentIncidents(userId),
+  ]);
+
+  return (
+    <DashboardClient
+      rows={buildMonitorRows(monitors, health, now)}
+      analytics={analytics}
+      trend={trend}
+      openIncidents={incidents.open}
+      resolvedIncidents={incidents.resolved}
+      now={now}
+    />
+  );
 }
 
 function DashboardSkeleton() {
-	return (
-		<div className="animate-pulse space-y-8">
-			<div className="space-y-3">
-				<div className="h-4 w-36 rounded bg-slate-800" />
-				<div className="h-9 w-64 rounded bg-slate-800" />
-				<div className="h-4 w-96 max-w-full rounded bg-slate-800" />
-			</div>
-
-			<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-				{[1, 2, 3, 4].map((item) => (
-					<div
-						key={item}
-						className="h-32 rounded-2xl border border-white/10 bg-slate-900/70"
-					/>
-				))}
-			</div>
-
-			<div className="h-80 rounded-2xl border border-white/10 bg-slate-900/50" />
-		</div>
-	);
+  return (
+    <div aria-busy="true" className="space-y-6">
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-9 w-32" />
+      </div>
+      <Skeleton className="h-14 w-full" />
+      <Skeleton className="h-96 w-full" />
+      <Skeleton className="h-64 w-full" />
+    </div>
+  );
 }
 
 export default async function DashboardPage({
-	searchParams,
+  searchParams,
 }: DashboardPageProps) {
-	const [session, params] = await Promise.all([getSession(), searchParams]);
+  const [session, params] = await Promise.all([getSession(), searchParams]);
 
-	if (!session) {
-		redirect("/sign-in");
-	}
+  if (!session) {
+    redirect("/sign-in");
+  }
 
-	const range = parseAnalyticsRange(params.range);
+  const range = parseAnalyticsRange(params.range);
 
-	return (
-		<Suspense fallback={<DashboardSkeleton />}>
-			<DashboardContent userId={session.user.id} range={range} />
-		</Suspense>
-	);
+  return (
+    <Suspense fallback={<DashboardSkeleton />}>
+      <DashboardContent userId={session.user.id} range={range} />
+    </Suspense>
+  );
 }
