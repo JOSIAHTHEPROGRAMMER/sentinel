@@ -4,13 +4,13 @@ import { getProjectOptions } from "@/lib/data/project-options";
 import { NewMonitorForm } from "./new-monitor-form";
 
 export default async function NewMonitorPage() {
-  const session = await getSession();
+	const session = await getSession();
 
-  if (!session) {
-    redirect("/sign-in");
-  }
+	if (!session) {
+		redirect("/sign-in");
+	}
 
-  const projects = await getProjectOptions(session.user.id);
+	const projects = await getProjectOptions(session.user.id);
 
-  return <NewMonitorForm projects={projects} />;
+	return <NewMonitorForm projects={projects} />;
 }
